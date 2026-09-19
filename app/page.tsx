@@ -1,7 +1,6 @@
 'use client';
 
-import { Suspense, useMemo } from 'react';
-import { SearchForm } from '@/components/search/SearchForm';
+import { Suspense, useMemo, useState } from 'react';
 import { NoResults } from '@/components/search/NoResults';
 import { PopularFeatures } from '@/components/home/PopularFeatures';
 import { FavoritesSidebar } from '@/components/favorites/FavoritesSidebar';
@@ -23,6 +22,7 @@ function HomePage() {
     handleReset,
     handleCancelSearch,
   } = useHomePage();
+  const [contentType, setContentType] = useState<'anime' | 'tv' | 'movie'>('anime');
 
   // Real-time latency pinging
   const sourceUrls = useMemo(() =>
@@ -39,28 +39,18 @@ function HomePage() {
 
   return (
     <div className="min-h-screen">
-      {/* Glass Navbar */}
-      <Navbar onReset={handleReset} />
-
-      {/* Search Form - Separate from navbar */}
-      <div className="max-w-7xl mx-auto px-4 mt-6 mb-8 relative" style={{
-        transform: 'translate3d(0, 0, 0)',
-        zIndex: 1000
-      }}>
-        <SearchForm
-          onSearch={handleSearch}
-          onClear={handleReset}
-          onCancelSearch={handleCancelSearch}
-          isLoading={loading}
-          initialQuery={query}
-          currentSource=""
-          checkedSources={completedSources}
-          totalSources={totalSources}
-        />
-      </div>
-
+      {/* B站同款吸顶紧凑Navbar，内置搜索条 */}
+      <Navbar
+        onReset={handleReset}
+        onSearch={handleSearch}
+        initialQuery={query}
+        isLoading={loading}
+        contentType={contentType}
+        onContentTypeChange={setContentType}
+      />
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20">
+      {/* Main Content */}
+      <main className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-6">
         {/* Results Section */}
         {(results.length >= 1 || (!loading && results.length > 0)) && (
           <SearchResults
@@ -74,7 +64,7 @@ function HomePage() {
         {/* Popular Features - Homepage */}
         {!loading && !hasSearched && (
           <>
-            <PopularFeatures onSearch={handleSearch} />
+            <PopularFeatures onSearch={handleSearch} contentType={contentType} />
           </>
         )}
 

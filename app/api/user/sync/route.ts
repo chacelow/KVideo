@@ -7,10 +7,11 @@ import { getRedisClient } from '@/lib/server/redis';
 export const runtime = 'edge';
 
 function syncUnavailableResponse() {
-  return NextResponse.json(
-    { error: 'Server-side sync is not configured on this deployment' },
-    { status: 503 }
-  );
+  return NextResponse.json({
+    success: true,
+    data: { history: [], favorites: [] },
+    disabled: true,
+  });
 }
 
 export async function GET(request: NextRequest) {

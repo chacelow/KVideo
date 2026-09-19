@@ -5,6 +5,20 @@
 import type { SortOption } from '@/lib/store/settings-store';
 import type { Video } from '@/lib/types';
 
+function getQualityWeight(video: Video): number {
+  const quality = 'quality' in video && typeof (video as Record<string, unknown>).quality === 'string'
+    ? String((video as Record<string, unknown>).quality)
+    : '';
+  const text = `${video.vod_name || ''} ${video.vod_remarks || ''} ${quality}`.toLowerCase();
+  if (/(4320p|8k)/i.test(text)) return 8000;
+  if (/(2160p|4k|uhd)/i.test(text)) return 4000;
+  if (/(1440p|2k|qhd)/i.test(text)) return 2000;
+  if (/(1080p|1080i|fhd|蓝光|bd|remux)/i.test(text)) return 1080;
+  if (/(720p|hd)/i.test(text)) return 720;
+  if (/(tc|ts|抢先|枪版|预告)/i.test(text)) return -500;
+  return 480;
+}
+
 export function sortVideos(videos: Video[], sortBy: SortOption): Video[] {
   const sorted = [...videos];
 
@@ -63,13 +77,19 @@ export function sortVideos(videos: Video[], sortBy: SortOption): Video[] {
 
     case 'default':
     default:
-      // Default: by relevance then latency
+      // Default: 1. 相关度优先 -> 2. 清晰度(4K/1080P/蓝光)优先 -> 3. 网络延迟Ping优先
       return sorted.sort((a, b) => {
         const scoreA = (a as any).relevanceScore || 0;
         const scoreB = (b as any).relevanceScore || 0;
 
         if (scoreA !== scoreB) {
           return scoreB - scoreA;
+        }
+
+        const qualA = getQualityWeight(a);
+        const qualB = getQualityWeight(b);
+        if (qualA !== qualB) {
+          return qualB - qualA;
         }
 
         const latencyA = a.latency || 99999;

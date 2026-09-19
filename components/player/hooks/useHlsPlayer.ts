@@ -24,8 +24,14 @@ export function useHlsPlayer({
     const hlsRef = useRef<Hls | null>(null);
     const { adFilterMode, adKeywords } = usePlayerSettings(isPremium);
     const { mediaProxyEnabled } = useRuntimeFeatures();
-    const isAdFilterEnabled = adFilterMode !== 'off';
 
+    // 使用 ref 保存去广告配置，避免设置变更时触发 HLS 实例销毁打断播放
+    const adFilterModeRef = useRef(adFilterMode);
+    const adKeywordsRef = useRef(adKeywords);
+    useEffect(() => {
+        adFilterModeRef.current = adFilterMode;
+        adKeywordsRef.current = adKeywords;
+    }, [adFilterMode, adKeywords]);
     useEffect(() => {
         const video = videoRef.current;
         if (!video || !src) return;
@@ -53,13 +59,13 @@ export function useHlsPlayer({
 
             class AdFilterLoader extends DefaultLoader {
                 load(context: any, config: any, callbacks: any) {
-                    if (isAdFilterEnabled && (context.type === 'manifest' || context.type === 'level')) {
+                    const isFiltering = adFilterModeRef.current !== 'off';
+                    if (isFiltering && (context.type === 'manifest' || context.type === 'level')) {
                         const originalOnSuccess = callbacks.onSuccess;
                         callbacks.onSuccess = (response: any, stats: any, context: any, networkDetails: any) => {
                             if (typeof response.data === 'string') {
                                 try {
-                                    // Filter the content
-                                    response.data = filterM3u8Ad(response.data, context.url, adFilterMode, adKeywords);
+                                    response.data = filterM3u8Ad(response.data, context.url, adFilterModeRef.current, adKeywordsRef.current);
                                 } catch (e) {
                                     console.warn('[HLS] Ad filter error:', e);
                                 }
@@ -70,7 +76,7 @@ export function useHlsPlayer({
                     super.load(context, config, callbacks);
                 }
             }
-
+            const isAdFilterEnabled = adFilterModeRef.current !== 'off';
             if (!isNativeHlsSupported || isAdFilterEnabled) {
                 // If ad filtering is on, we force Hls.js even on native-supported desktop browsers
                 // Exceptions might exist for iOS where MSE is strictly not available, check Hls.isSupported() result carefully.
@@ -424,5 +430,5 @@ export function useHlsPlayer({
             }
             extraBlobs.forEach(url => URL.revokeObjectURL(url));
         };
-    }, [src, videoRef, autoPlay, onAutoPlayPrevented, onError, isAdFilterEnabled, adFilterMode, adKeywords, mediaProxyEnabled]);
+    }, [src, videoRef, autoPlay, onAutoPlayPrevented, onError, mediaProxyEnabled]);
 }

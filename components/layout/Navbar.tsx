@@ -1,141 +1,229 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { ThemeSwitcher } from '@/components/ThemeSwitcher';
 import { useSiteIcon } from '@/components/SiteIconProvider';
-import { Icons } from '@/components/ui/Icon';
 import { siteConfig } from '@/lib/config/site-config';
 import { getSession, clearSession, hasPermission, type AuthSession } from '@/lib/store/auth-store';
 import { useRuntimeFeatures } from '@/components/RuntimeFeaturesProvider';
-import { LogOut } from 'lucide-react';
+import { LogOut, Heart, Settings, Tv, Search, X, Loader2 } from 'lucide-react';
+
+export type ContentCategory = 'anime' | 'tv' | 'movie';
 
 interface NavbarProps {
-    onReset: () => void;
-    isPremiumMode?: boolean;
+  onReset?: () => void;
+  isPremiumMode?: boolean;
+  onSearch?: (query: string) => void;
+  initialQuery?: string;
+  isLoading?: boolean;
+  contentType?: ContentCategory;
+  onContentTypeChange?: (type: ContentCategory) => void;
 }
 
-export function Navbar({ onReset, isPremiumMode = false }: NavbarProps) {
-    const settingsHref = isPremiumMode ? '/premium/settings' : '/settings';
-    const favoritesHref = isPremiumMode ? '/premium/favorites' : '/favorites';
-    const [session] = useState<AuthSession | null>(() => getSession());
-    const { iptvEnabled } = useRuntimeFeatures();
-    const siteIconSrc = useSiteIcon();
+export function Navbar({
+  onReset,
+  isPremiumMode = false,
+  onSearch,
+  initialQuery = '',
+  isLoading = false,
+  contentType = 'anime',
+  onContentTypeChange,
+}: NavbarProps) {
+  const router = useRouter();
+  const settingsHref = isPremiumMode ? '/premium/settings' : '/settings';
+  const favoritesHref = isPremiumMode ? '/premium/favorites' : '/favorites';
+  const [session] = useState<AuthSession | null>(() => getSession());
+  const { iptvEnabled } = useRuntimeFeatures();
+  const siteIconSrc = useSiteIcon();
 
-    const handleLogout = () => {
-        fetch('/api/auth/session', { method: 'DELETE' })
-            .catch(() => {
-                // Best effort only.
-            })
-            .finally(() => {
-                clearSession();
-                window.location.href = '/';
-            });
-    };
+  const [searchVal, setSearchVal] = useState(initialQuery);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-    return (
-        <nav className="sticky top-0 z-[2000] pt-4 pb-2" style={{
-            transform: 'translate3d(0, 0, 0)',
-            willChange: 'transform'
-        }}>
-            <div className="max-w-7xl mx-auto px-4">
-                <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] shadow-[var(--shadow-sm)] px-3 sm:px-6 py-2 sm:py-4 rounded-[var(--radius-2xl)]" style={{
-                    transform: 'translate3d(0, 0, 0)'
-                }}>
-                    <div className="flex items-center justify-between gap-2 sm:gap-4">
-                        <Link
-                            href={isPremiumMode ? '/premium' : '/'}
-                            className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity cursor-pointer min-w-0"
-                            onClick={onReset}
-                            data-focusable
-                        >
-                            <div className="w-8 h-8 sm:w-10 sm:h-10 relative flex items-center justify-center flex-shrink-0">
-                                <Image
-                                    src={siteIconSrc}
-                                    alt={siteConfig.name}
-                                    width={40}
-                                    height={40}
-                                    unoptimized
-                                    className="object-contain"
-                                />
-                            </div>
-                            <div className="flex flex-col min-w-0">
-                                <h1 className="text-lg sm:text-2xl font-bold text-[var(--text-color)] truncate">{siteConfig.name}</h1>
-                                <p className="text-xs text-[var(--text-color-secondary)] hidden sm:block truncate">{siteConfig.description}</p>
-                            </div>
-                        </Link>
+  useEffect(() => {
+    setSearchVal(initialQuery);
+  }, [initialQuery]);
 
-                        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-                            {/* IPTV Link - only show if user has iptv_access or no auth configured */}
-                            {iptvEnabled && hasPermission('iptv_access') && (
-                            <Link
-                                href="/iptv"
-                                className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center rounded-[var(--radius-full)] bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-color)] hover:bg-[color-mix(in_srgb,var(--accent-color)_10%,transparent)] transition-all duration-200 cursor-pointer"
-                                aria-label="直播"
-                                title="直播"
-                                data-focusable
-                            >
-                                <Icons.TV size={16} className="sm:w-5 sm:h-5" />
-                            </Link>
-                            )}
+  const handleSearchSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const trimmed = searchVal.trim();
+    if (!trimmed) return;
 
-                            {/* User Info */}
-                            {session && (
-                                <div className="flex items-center gap-1 sm:gap-2">
-                                    <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-[var(--radius-full)] text-xs">
-                                        <div className="w-5 h-5 rounded-[var(--radius-full)] bg-[var(--accent-color)]/10 flex items-center justify-center text-[var(--accent-color)] font-bold text-[10px] border border-[var(--glass-border)]">
-                                            {session.name.charAt(0)}
-                                        </div>
-                                        <span className="text-[var(--text-color)] max-w-[60px] truncate">{session.name}</span>
-                                        {(session.role === 'admin' || session.role === 'super_admin') && (
-                                            <span className="px-1 py-0.5 bg-[var(--accent-color)]/10 text-[var(--accent-color)] rounded text-[10px] font-medium">
-                                                {session.role === 'super_admin' ? '超管' : '管理'}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <button
-                                        onClick={handleLogout}
-                                        className="w-8 h-8 sm:w-8 sm:h-8 flex items-center justify-center rounded-[var(--radius-full)] bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-color-secondary)] hover:text-red-500 hover:border-red-500/30 transition-all duration-200 cursor-pointer"
-                                        aria-label="退出登录"
-                                        title="退出登录"
-                                    >
-                                        <LogOut size={14} />
-                                    </button>
-                                </div>
-                            )}
-                            <a
-                                href="https://github.com/KuekHaoYang/KVideo"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center rounded-[var(--radius-full)] bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-color)] hover:bg-[color-mix(in_srgb,var(--accent-color)_10%,transparent)] transition-all duration-200 cursor-pointer hidden sm:flex"
-                                aria-label="GitHub 仓库"
-                            >
-                                <Icons.Github size={20} />
-                            </a>
-                            <Link
-                                href={favoritesHref}
-                                className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center rounded-[var(--radius-full)] bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-color)] hover:bg-[color-mix(in_srgb,var(--accent-color)_10%,transparent)] transition-all duration-200 cursor-pointer"
-                                aria-label="我的收藏"
-                                data-focusable
-                            >
-                                <Icons.Heart size={20} />
-                            </Link>
-                            <Link
-                                href={settingsHref}
-                                className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center rounded-[var(--radius-full)] bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-color)] hover:bg-[color-mix(in_srgb,var(--accent-color)_10%,transparent)] transition-all duration-200 cursor-pointer"
-                                aria-label="设置"
-                                data-focusable
-                            >
-                                <svg className="w-4 h-4 sm:w-5 sm:h-5" viewBox="0 -960 960 960" fill="currentColor">
-                                    <path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z" />
-                                </svg>
-                            </Link>
-                            <ThemeSwitcher />
-                        </div>
-                    </div>
-                </div>
+    if (onSearch) {
+      onSearch(trimmed);
+    } else {
+      router.push(`/?q=${encodeURIComponent(trimmed)}`);
+    }
+  };
+
+  const handleClear = () => {
+    setSearchVal('');
+    if (onReset) onReset();
+    inputRef.current?.focus();
+  };
+
+  const handleLogout = () => {
+    fetch('/api/auth/session', { method: 'DELETE' })
+      .catch(() => {})
+      .finally(() => {
+        clearSession();
+        window.location.href = '/';
+      });
+  };
+
+  const handleCategoryClick = (cat: ContentCategory) => {
+    if (onContentTypeChange) {
+      onContentTypeChange(cat);
+      if (onReset) onReset(); // 切换分类时清除搜索态，展现分类首页
+    } else {
+      router.push(`/?type=${cat}`);
+    }
+  };
+
+  return (
+    // B站同款：超紧凑(52px)、扁平无厚框、sticky吸顶不占面积
+    <header className="sticky top-0 z-50 w-full h-[52px] bg-[#18191c]/95 backdrop-blur-md border-b border-white/5 select-none">
+      <div className="max-w-[1920px] mx-auto h-full px-4 sm:px-6 flex items-center justify-between gap-4">
+        {/* 1. 左侧：Logo + B站同款纯文字分类导航 (动漫 / 电视剧 / 电影) */}
+        <div className="flex items-center gap-6 shrink-0">
+          <Link
+            href={isPremiumMode ? '/premium' : '/'}
+            className="flex items-center gap-2 hover:opacity-85 transition-opacity cursor-pointer"
+            onClick={onReset}
+          >
+            <div className="w-6 h-6 relative flex items-center justify-center shrink-0">
+              <Image
+                src={siteIconSrc}
+                alt={siteConfig.name}
+                width={24}
+                height={24}
+                unoptimized
+                className="object-contain"
+              />
             </div>
-        </nav>
-    );
+            <span className="text-sm font-bold text-[#e3e5e7] tracking-wide mr-2">
+              {siteConfig.name}
+            </span>
+          </Link>
+
+          {/* B站同款顶部分类导航：动漫 | 电视剧 | 电影 */}
+          <nav className="flex items-center gap-6 text-xs sm:text-sm">
+            {[
+              { id: 'anime', label: '动漫' },
+              { id: 'tv', label: '电视剧' },
+              { id: 'movie', label: '电影' },
+            ].map((tab) => {
+              const isActive = contentType === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => handleCategoryClick(tab.id as ContentCategory)}
+                  className={`cursor-pointer transition-colors relative py-1 ${
+                    isActive
+                      ? 'text-pink-400 font-bold'
+                      : 'text-[#9499a0] hover:text-[#e3e5e7]'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  {isActive && (
+                    <span className="absolute bottom-0 inset-x-0 h-0.5 bg-pink-500 rounded-full" />
+                  )}
+                </button>
+              );
+            })}
+
+            {iptvEnabled && hasPermission('iptv_access') && (
+              <Link
+                href="/iptv"
+                className="hover:text-pink-400 text-[#9499a0] transition-colors cursor-pointer flex items-center gap-1"
+              >
+                <Tv size={12} />
+                <span className="hidden sm:inline">直播</span>
+              </Link>
+            )}
+          </nav>
+        </div>
+
+        {/* 2. 中间：B站同款紧凑搜索框 (高度32px，灰底扁平胶囊，直接内嵌在Header内) */}
+        <div className="flex-1 max-w-lg mx-2 sm:mx-auto">
+          <form onSubmit={handleSearchSubmit} className="relative w-full flex items-center group">
+            <input
+              ref={inputRef}
+              type="text"
+              value={searchVal}
+              onChange={(e) => setSearchVal(e.target.value)}
+              placeholder="搜索番剧、动漫、电影、电视剧..."
+              className="w-full h-[32px] pl-8 pr-12 rounded-md bg-[#2a2b30] hover:bg-[#323338] focus:bg-[#323338] border border-transparent focus:border-pink-500/50 text-xs text-[#e3e5e7] placeholder-[#9499a0] transition-all outline-none"
+            />
+            <Search
+              size={13}
+              className="absolute left-2.5 text-[#9499a0] group-hover:text-white pointer-events-none transition-colors"
+            />
+
+            <div className="absolute right-1.5 flex items-center gap-1">
+              {searchVal && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="p-1 text-[#9499a0] hover:text-white transition-colors cursor-pointer"
+                >
+                  <X size={11} />
+                </button>
+              )}
+              {isLoading ? (
+                <Loader2 size={12} className="text-pink-400 animate-spin mr-1" />
+              ) : (
+                <button
+                  type="submit"
+                  className="px-2 py-0.5 text-[11px] font-bold text-pink-400 hover:text-pink-300 transition-colors cursor-pointer"
+                >
+                  搜索
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+
+        {/* 3. 右侧：B站同款极简图标区 (追番收藏、设置、主题、用户) */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 text-[#9499a0]">
+          <Link
+            href={favoritesHref}
+            className="flex items-center gap-1 p-1.5 hover:text-pink-400 hover:bg-white/5 rounded transition-colors text-xs"
+            title="追番与收藏"
+          >
+            <Heart size={15} />
+            <span className="hidden lg:inline text-[11px]">追番</span>
+          </Link>
+
+          <Link
+            href={settingsHref}
+            className="p-1.5 hover:text-[#e3e5e7] hover:bg-white/5 rounded transition-colors"
+            title="设置"
+          >
+            <Settings size={15} />
+          </Link>
+
+          {/* 用户账号状态 */}
+          {session && (
+            <div className="flex items-center gap-1 text-xs text-[#9499a0] ml-1">
+              <span className="truncate max-w-[70px] text-[11px]">{session.name}</span>
+              <button
+                onClick={handleLogout}
+                className="p-1 hover:text-rose-400 transition-colors cursor-pointer"
+                title="退出登录"
+              >
+                <LogOut size={12} />
+              </button>
+            </div>
+          )}
+
+          <div className="pl-1 border-l border-white/10">
+            <ThemeSwitcher />
+          </div>
+        </div>
+      </div>
+    </header>
+  );
 }

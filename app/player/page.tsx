@@ -1,36 +1,29 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { Suspense, useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { VideoPlayer } from '@/components/player/VideoPlayer';
 import { VideoMetadata } from '@/components/player/VideoMetadata';
-import { EpisodeList } from '@/components/player/EpisodeList';
-import { PlayerError } from '@/components/player/PlayerError';
-import { SourceInfo } from '@/components/player/EpisodeList';
-import type { VideoSource } from '@/lib/types';
 import type { VideoResolutionInfo } from '@/components/player/hooks/useVideoResolution';
-import { useResolutionProbe } from '@/lib/hooks/useResolutionProbe';
-import { setCachedResolution } from '@/lib/player/resolution-cache';
 import { useVideoPlayer } from '@/lib/hooks/useVideoPlayer';
 import { useHistory } from '@/lib/store/history-store';
 import { FavoritesSidebar } from '@/components/favorites/FavoritesSidebar';
 import { FavoriteButton } from '@/components/favorites/FavoriteButton';
-import { PlayerNavbar } from '@/components/player/PlayerNavbar';
+import { Navbar } from '@/components/layout/Navbar';
 import { settingsStore } from '@/lib/store/settings-store';
 import { premiumModeSettingsStore } from '@/lib/store/premium-mode-settings';
-import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { getSourceName } from '@/lib/utils/source-names';
-import { retrieveGroupedSources, storeGroupedSources } from '@/lib/utils/grouped-sources-cache';
+import { ShieldCheck } from 'lucide-react';
+import type { SourceItem } from '@/components/player/desktop/SourceResolutionMenu';
 
-type PlayerViewportMode = 'standard' | 'wide' | 'cinema';
-
-const PLAYER_VIEWPORT_MODE_KEY = 'kvideo-player-viewport-mode';
-const PLAYER_VIEWPORT_MODE_ORDER: PlayerViewportMode[] = ['standard', 'wide', 'cinema'];
-const PLAYER_VIEWPORT_MODE_LABELS: Record<PlayerViewportMode, string> = {
-  standard: '标准',
-  wide: '宽屏',
-  cinema: '影院',
-};
+interface AvailableSourceItem {
+  id: string | number;
+  source: string;
+  sourceName: string;
+  vod_name: string;
+  vod_remarks?: string;
+  latency?: number;
+}
 
 function PlayerContent() {
   const searchParams = useSearchParams();
@@ -40,202 +33,61 @@ function PlayerContent() {
 
   const videoId = searchParams.get('id');
   const source = searchParams.get('source');
-  const title = searchParams.get('title');
+  const title = searchParams.get('title') || '';
   const episodeParam = searchParams.get('episode');
-  // Support both legacy 'groupedSources' (full JSON) and new 'gs' (sessionStorage key)
-  const groupedSourcesParam = searchParams.get('groupedSources');
-  const gsKey = searchParams.get('gs');
+
   const missingRequiredParams = !videoId || !source;
 
-  // Track settings - use mode-specific store
   const modeStore = isPremium ? premiumModeSettingsStore : settingsStore;
-  const [isReversed, setIsReversed] = useState(() =>
+  const [isReversed] = useState(() =>
     typeof window !== 'undefined' ? modeStore.getSettings().episodeReverseOrder : false
   );
 
-  // Mobile tab state
-  const [activeTab, setActiveTab] = useState<'episodes' | 'info'>('episodes');
-  const [playerViewportMode, setPlayerViewportMode] = useState<PlayerViewportMode>(() => {
-    if (typeof window === 'undefined') return 'standard';
-    const saved = localStorage.getItem(PLAYER_VIEWPORT_MODE_KEY);
-    return saved === 'wide' || saved === 'cinema' || saved === 'standard' ? saved : 'standard';
-  });
-  const [isSourceSectionCollapsed, setIsSourceSectionCollapsed] = useState(false);
-  const [isEpisodeSectionCollapsed, setIsEpisodeSectionCollapsed] = useState(false);
+  // 硬件解码器真实物理分辨率
+  const [hardwareResolution, setHardwareResolution] = useState<VideoResolutionInfo | null>(null);
 
-  // Sync with store changes if any (though usually it's one-way from UI to store)
-  useEffect(() => {
-    setIsReversed(modeStore.getSettings().episodeReverseOrder);
-  }, [modeStore]);
+  // 播放器内部多源列表：并发检索全网所有源并直接喂给播放器内部
+  const [allSearchedSources, setAllSearchedSources] = useState<AvailableSourceItem[]>([]);
 
-  useEffect(() => {
-    localStorage.setItem(PLAYER_VIEWPORT_MODE_KEY, playerViewportMode);
-  }, [playerViewportMode]);
+  const playerTimeRef = useRef(0);
 
-  // Migrate legacy long groupedSources URL to short gs key
-  useEffect(() => {
-    if (groupedSourcesParam && !gsKey) {
-      try {
-        const data = JSON.parse(groupedSourcesParam);
-        if (Array.isArray(data) && data.length > 0) {
-          const newKey = storeGroupedSources(data);
-          if (newKey) {
-            const params = new URLSearchParams(searchParams.toString());
-            params.delete('groupedSources');
-            params.set('gs', newKey);
-            router.replace(`/player?${params.toString()}`, { scroll: false });
-          }
-        }
-      } catch { /* ignore parse errors */ }
-    }
-  }, [groupedSourcesParam, gsKey, router, searchParams]);
-
-  useEffect(() => {
-    if (missingRequiredParams) {
-      router.push('/');
-    }
-  }, [missingRequiredParams, router]);
-
-  const [pendingFallback, setPendingFallback] = useState(false);
-  const [discoveredSources, setDiscoveredSources] = useState<SourceInfo[]>([]);
-  const groupedSourcesRef = useRef<SourceInfo[]>([]);
-
-  const handleSourceUnavailable = useCallback(() => {
-    const groupedSources = groupedSourcesRef.current;
-    const alternatives = groupedSources.filter((item) => item.source !== source);
-    if (alternatives.length === 0) {
-      setPendingFallback(true);
-      return;
-    }
-
-    setPendingFallback(false);
-    const best = [...alternatives].sort((left, right) => {
-      const latA = left.latency ?? Infinity;
-      const latB = right.latency ?? Infinity;
-      return latA - latB;
-    })[0];
-
-    const params = new URLSearchParams();
-    params.set('id', String(best.id));
-    params.set('source', best.source);
-    params.set('title', title || '');
-    if (episodeParam) params.set('episode', episodeParam);
-    if (gsKey) {
-      params.set('gs', gsKey);
-    } else if (groupedSources.length > 1) {
-      const newKey = storeGroupedSources(groupedSources);
-      if (newKey) params.set('gs', newKey);
-    }
-    if (isPremium) params.set('premium', '1');
-    router.replace(`/player?${params.toString()}`, { scroll: false });
-  }, [episodeParam, gsKey, isPremium, router, source, title]);
-
+  // 播放器状态机
   const {
     videoData,
-    loading,
-    videoError,
     currentEpisode,
     playUrl,
     setCurrentEpisode,
     setPlayUrl,
-    setVideoError,
-    fetchVideoDetails,
-  } = useVideoPlayer(videoId, source, episodeParam, isReversed, handleSourceUnavailable);
+  } = useVideoPlayer(videoId, source, episodeParam, isReversed);
 
-  const groupedSources = useMemo<SourceInfo[]>(() => {
-    let sources: SourceInfo[] = [];
-
-    if (gsKey) {
-      const cached = retrieveGroupedSources(gsKey);
-      if (cached) sources = cached;
-    } else if (groupedSourcesParam) {
-      try {
-        sources = JSON.parse(groupedSourcesParam);
-      } catch {
-        sources = [];
-      }
-    }
-
-    if (discoveredSources.length > 0) {
-      for (const ds of discoveredSources) {
-        if (!sources.find((item) => item.source === ds.source)) {
-          sources.push(ds);
-        }
-      }
-    }
-
-    if (source && !sources.find((item) => item.source === source)) {
-      sources.unshift({
-        id: videoId || '',
-        source,
-        sourceName: getSourceName(source),
-        pic: videoData?.vod_pic,
-      });
-    }
-
-    const fallbackPic = videoData?.vod_pic;
-    if (fallbackPic) {
-      sources = sources.map((item) => item.pic ? item : { ...item, pic: fallbackPic });
-    }
-
-    return sources;
-  }, [discoveredSources, groupedSourcesParam, gsKey, source, videoData?.vod_pic, videoId]);
-
+  // 进页面立即以 title 检索全网所有源，直接喂给播放器内部控件
   useEffect(() => {
-    groupedSourcesRef.current = groupedSources;
-  }, [groupedSources]);
-
-  // Retry pending fallback when discovered sources arrive
-  useEffect(() => {
-    if (pendingFallback && discoveredSources.length > 0) {
-      handleSourceUnavailable();
-    }
-  }, [discoveredSources, handleSourceUnavailable, pendingFallback]);
-
-  // Background fetch alternative sources when none provided or when existing ones lack full info
-  const fetchedSourcesRef = useRef(false);
-  useEffect(() => {
-    if (fetchedSourcesRef.current || !title) return;
-
-    // Check if existing grouped sources already have full info (pic + latency)
-    let existingSources: SourceInfo[] = [];
-    if (gsKey) {
-      const cached = retrieveGroupedSources(gsKey);
-      if (cached) existingSources = cached;
-    } else if (groupedSourcesParam) {
-      try { existingSources = JSON.parse(groupedSourcesParam); } catch {}
-    }
-    // Always fetch alternatives if there's a pending fallback (source unavailable)
-    const hasFullInfo = !pendingFallback && existingSources.length > 1 &&
-      existingSources.every(s => s.pic || s.latency !== undefined);
-    if (hasFullInfo) return;
-
-    fetchedSourcesRef.current = true;
-
-    const settings = settingsStore.getSettings();
-    const sourcesForMode = isPremium ? settings.premiumSources : settings.sources;
-    const allSources = sourcesForMode?.filter((s: VideoSource) => s.enabled !== false) || [];
-    // Only search other sources (not the current one)
-    const otherSources = allSources.filter((s: VideoSource) => s.id !== source);
-    if (otherSources.length === 0) return;
+    if (!title) return;
 
     const controller = new AbortController();
 
     (async () => {
       try {
+        let targets = settingsStore.getSettings().sources?.filter((s) => s.enabled !== false) || [];
+        if (targets.length < 3) {
+          const sRes = await fetch('/api/sources');
+          if (sRes.ok) targets = await sRes.json();
+        }
+
         const response = await fetch('/api/search-parallel', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: title, sources: otherSources, page: 1 }),
+          body: JSON.stringify({ query: title, sources: targets, page: 1 }),
           signal: controller.signal,
         });
+
         if (!response.ok || !response.body) return;
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        const found: SourceInfo[] = [];
-        const normalizedTitle = title.toLowerCase().trim();
+        const found: AvailableSourceItem[] = [];
+        const cleanTarget = title.toLowerCase().replace(/[\s\p{P}]/gu, '');
 
         while (true) {
           const { done, value } = await reader.read();
@@ -248,325 +100,175 @@ function PlayerContent() {
             if (!line.startsWith('data: ')) continue;
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.type === 'videos' && data.videos) {
-                // Find exact or close title match
-                const match = data.videos.find((v: {
-                  vod_name?: string;
-                  vod_id: string | number;
-                  source: string;
-                  sourceDisplayName?: string;
-                  latency?: number;
-                  vod_pic?: string;
-                  type_name?: string;
-                  vod_remarks?: string;
-                }) =>
-                  v.vod_name?.toLowerCase().trim() === normalizedTitle
-                );
-                if (match) {
-                  found.push({
-                    id: match.vod_id,
-                    source: match.source,
-                    sourceName: match.sourceDisplayName || getSourceName(match.source),
-                    latency: match.latency,
-                    pic: match.vod_pic,
-                    typeName: match.type_name,
-                    remarks: match.vod_remarks,
-                  });
-                  // Update state incrementally
-                  setDiscoveredSources([...found]);
+              if (data.type === 'videos' && Array.isArray(data.videos)) {
+                for (const v of data.videos) {
+                  const cleanName = (v.vod_name || '').toLowerCase().replace(/[\s\p{P}]/gu, '');
+                  if (cleanName === cleanTarget || cleanName.includes(cleanTarget) || cleanTarget.includes(cleanName)) {
+                    if (!found.some((item) => item.source === v.source)) {
+                      found.push({
+                        id: v.vod_id,
+                        source: v.source,
+                        sourceName: v.sourceDisplayName || getSourceName(v.source),
+                        vod_name: v.vod_name,
+                        vod_remarks: v.vod_remarks,
+                        latency: v.latency,
+                      });
+                      setAllSearchedSources([...found]);
+                    }
+                  }
                 }
               }
-            } catch { /* ignore parse errors */ }
+            } catch {}
           }
         }
-      } catch {
-        // Silently ignore - this is a background enhancement
-      }
+      } catch {}
     })();
 
     return () => controller.abort();
-  }, [groupedSourcesParam, gsKey, isPremium, pendingFallback, source, title]);
+  }, [title]);
 
-  // Track current source for switching
-  const [currentSourceId, setCurrentSourceId] = useState(source);
-  const playerTimeRef = useRef(0);
-
-  useEffect(() => {
-    setCurrentSourceId(source);
-  }, [source]);
-
-  // Track detected video resolution from the player
-  const [detectedResolution, setDetectedResolution] = useState<VideoResolutionInfo | null>(null);
-
-  // Probe resolution for all grouped sources (not just the playing one)
-  const probeList = useMemo(() => {
-    return groupedSources.map((item) => ({
-      id: item.id,
-      source: item.source,
-      episodeIndex: currentEpisode,
-    }));
-  }, [groupedSources, currentEpisode]);
-  const { resolutions: sourceResolutions } = useResolutionProbe(probeList);
-
-  const handleResolutionDetected = useCallback((info: VideoResolutionInfo) => {
-    setDetectedResolution(info);
-    if (videoId && source) {
-      setCachedResolution(source, videoId, {
-        ...info,
-        origin: 'played',
-        episodeIndex: currentEpisode,
-      });
-    }
-  }, [currentEpisode, source, videoId]);
-
-  // Add initial history entry when video data is loaded
-  useEffect(() => {
-    if (videoData && playUrl && videoId && source) {
-      // Map episodes to include index
-      const mappedEpisodes = videoData.episodes?.map((ep, idx) => ({
-        name: ep.name || `第${idx + 1}集`,
-        url: ep.url,
-        index: idx,
-      })) || [];
-
-      addToHistory(
-        videoId,
-        videoData.vod_name || title || '未知视频',
-        playUrl,
-        currentEpisode,
-        source,
-        0, // Initial playback position
-        0, // Will be updated by VideoPlayer
-        videoData.vod_pic,
-        mappedEpisodes,
-        { vod_actor: videoData.vod_actor, type_name: videoData.type_name, vod_area: videoData.vod_area }
-      );
-    }
-  }, [videoData, playUrl, videoId, currentEpisode, source, title, addToHistory]);
-
-  const handleEpisodeClick = useCallback((episode: { url: string }, index: number) => {
+  // 切集处理
+  const handleEpisodeClick = useCallback((episode: { name?: string; url: string }, index: number) => {
     setCurrentEpisode(index);
     setPlayUrl(episode.url);
-    setVideoError('');
-
-    // Update URL to reflect current episode
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(window.location.search);
     params.set('episode', index.toString());
+    params.delete('t'); // 清除旧进度，从头播放新集
     router.replace(`/player?${params.toString()}`, { scroll: false });
-  }, [searchParams, router, setCurrentEpisode, setPlayUrl, setVideoError]);
+  }, [router, setCurrentEpisode, setPlayUrl]);
 
-  const handleToggleReverse = (reversed: boolean) => {
-    setIsReversed(reversed);
-    const settings = modeStore.getSettings();
-    modeStore.saveSettings({
-      ...settings,
-      episodeReverseOrder: reversed
-    });
+  // 切源处理
+  const handleSourceSelect = (target: SourceItem) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('id', String(target.id));
+    params.set('source', target.source);
+    params.set('title', title);
+    params.set('episode', currentEpisode.toString());
+    if (playerTimeRef.current > 1) {
+      params.set('t', Math.floor(playerTimeRef.current).toString());
+    }
+    router.replace(`/player?${params.toString()}`, { scroll: false });
   };
 
-  // Handle auto-next episode
-  const handleNextEpisode = useCallback(() => {
-    const episodes = videoData?.episodes;
-    if (!episodes) return;
+  // 硬件真实物理分辨率回调
+  const handleResolutionDetected = useCallback((info: VideoResolutionInfo) => {
+    setHardwareResolution(info);
+  }, []);
 
-    let nextIndex;
-    if (!isReversed) {
-      if (currentEpisode >= episodes.length - 1) return;
-      nextIndex = currentEpisode + 1;
-    } else {
-      if (currentEpisode <= 0) return;
-      nextIndex = currentEpisode - 1;
-    }
+  if (missingRequiredParams) return null;
 
-    const nextEpisode = episodes[nextIndex];
-    if (nextEpisode) {
-      handleEpisodeClick(nextEpisode, nextIndex); // handleEpisodeClick relies on state setters, which are stable
-    }
-  }, [currentEpisode, handleEpisodeClick, isReversed, videoData]);
+  // 格式化传入播放器内部的全部源列表
+  const playerSources: SourceItem[] = allSearchedSources.map((s) => ({
+    id: s.id,
+    source: s.source,
+    sourceName: s.sourceName,
+    latency: s.latency,
+    remarks: s.vod_remarks,
+  }));
 
-  const effectivePlayerViewportMode = useMemo<PlayerViewportMode>(() => {
-    const manualIndex = PLAYER_VIEWPORT_MODE_ORDER.indexOf(playerViewportMode);
-    const collapsedCount = Number(isSourceSectionCollapsed) + Number(isEpisodeSectionCollapsed);
-    const autoIndex = Math.min(collapsedCount, PLAYER_VIEWPORT_MODE_ORDER.length - 1);
-    return PLAYER_VIEWPORT_MODE_ORDER[Math.max(manualIndex, autoIndex)];
-  }, [playerViewportMode, isSourceSectionCollapsed, isEpisodeSectionCollapsed]);
-
-  const playerGridClass = effectivePlayerViewportMode === 'cinema'
-    ? 'xl:grid-cols-[minmax(0,1.9fr)_minmax(280px,0.55fr)]'
-    : effectivePlayerViewportMode === 'wide'
-      ? 'xl:grid-cols-[minmax(0,1.65fr)_minmax(300px,0.72fr)]'
-      : 'xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.9fr)]';
-
-  if (missingRequiredParams) {
-    return null;
+  // 如果当前源还没在列表里，补充进去
+  if (source && !playerSources.some((s) => s.source === source)) {
+    playerSources.unshift({
+      id: videoId,
+      source: source,
+      sourceName: getSourceName(source),
+      remarks: (videoData as Record<string, unknown> | null)?.vod_remarks as string | undefined,
+    });
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-color)]">
-      {/* Glass Navbar */}
-      <PlayerNavbar isPremium={isPremium} />
+    <div className="min-h-screen bg-[#121212] text-[#e3e5e7]">
+      {/* 52px 极简通用 Header */}
+      <Navbar isPremiumMode={isPremium} onReset={() => router.push(isPremium ? '/premium' : '/')} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-2">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <div className="animate-spin rounded-full h-16 w-16 border-4 border-[var(--accent-color)] border-t-transparent mb-4"></div>
-            <p className="text-[var(--text-color-secondary)]">正在加载视频详情...</p>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24 pt-3 space-y-4">
+        {/* 顶部标题栏与真实物理解码尺寸提示 */}
+        <div className="flex items-center justify-between gap-4 pb-2 border-b border-white/5 flex-wrap">
+          <div className="flex items-baseline gap-3 min-w-0">
+            <h1 className="text-base sm:text-xl font-bold text-white truncate">
+              {videoData?.vod_name || title}
+            </h1>
+            {videoData?.episodes?.[currentEpisode]?.name && (
+              <span className="text-xs sm:text-sm text-pink-400 font-semibold shrink-0">
+                {videoData.episodes[currentEpisode].name}
+              </span>
+            )}
+            {source && (
+              <span className="text-xs text-white/40 hidden sm:inline shrink-0">
+                ({getSourceName(source)})
+              </span>
+            )}
           </div>
-        ) : videoError && !videoData ? (
-          <PlayerError
-            error={videoError}
+
+          {/* 真实硬件解码物理像素 */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-xs">
+            <ShieldCheck size={14} className="text-emerald-400" />
+            <span className="text-white/60">真实硬件解码:</span>
+            <span className="font-bold text-white">
+              {hardwareResolution
+                ? `${hardwareResolution.width}x${hardwareResolution.height} (${hardwareResolution.label})`
+                : '检测物理分辨率中...'}
+            </span>
+          </div>
+        </div>
+
+        {/* 1. 播放器主体：B站同款1280px宽屏自适应，完全充满无多余黑框 */}
+        <div className="w-full rounded-xl overflow-hidden shadow-2xl relative">
+          <VideoPlayer
+            playUrl={playUrl}
+            videoId={videoId || undefined}
+            currentEpisode={currentEpisode}
             onBack={() => router.back()}
-            onRetry={fetchVideoDetails}
+            totalEpisodes={videoData?.episodes?.length || 0}
+            onNextEpisode={() => {
+              if (videoData?.episodes && currentEpisode < videoData.episodes.length - 1) {
+                handleEpisodeClick(videoData.episodes[currentEpisode + 1], currentEpisode + 1);
+              }
+            }}
+            isReversed={isReversed}
+            isPremium={isPremium}
+            videoTitle={videoData?.vod_name || title}
+            episodeName={videoData?.episodes?.[currentEpisode]?.name || ''}
+            externalTimeRef={playerTimeRef}
+            onResolutionDetected={handleResolutionDetected}
+            // 关键：把全网多源与选集直接注入播放器内部底栏！
+            sources={playerSources}
+            currentSource={source}
+            onSelectSource={handleSourceSelect}
+            onEpisodeClick={(idx) => {
+              if (videoData?.episodes?.[idx]) {
+                handleEpisodeClick(videoData.episodes[idx], idx);
+              }
+            }}
           />
-        ) : (
-          <div className="space-y-4">
-            {/* Viewport controls span full content width so player + sidebar tops align */}
-            <div className="hidden lg:flex items-center justify-between gap-4 rounded-[var(--radius-2xl)] border border-[var(--glass-border)] bg-[var(--glass-bg)] p-4">
-              <div>
-                <div className="text-sm font-semibold text-[var(--text-color)]">
-                  播放窗口大小
-                </div>
-                <div className="text-xs text-[var(--text-color-secondary)] mt-1">
-                  右侧源列表或选集折叠后，会自动提升到更宽的布局
-                  {effectivePlayerViewportMode !== playerViewportMode && `，当前已自动切到${PLAYER_VIEWPORT_MODE_LABELS[effectivePlayerViewportMode]}`}
-                </div>
-              </div>
-              <SegmentedControl<PlayerViewportMode>
-                options={[
-                  { label: '标准', value: 'standard' },
-                  { label: '宽屏', value: 'wide' },
-                  { label: '影院', value: 'cinema' },
-                ]}
-                value={playerViewportMode}
-                onChange={setPlayerViewportMode}
-                className="min-w-[240px]"
+        </div>
+
+        {/* 2. 播放器正下方：自然流式展开的作品详情与收藏 (完全不遮挡，自适应呈现) */}
+        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-base text-white">作品详情与介绍</h3>
+            {videoData && videoId && (
+              <FavoriteButton
+                videoId={videoId}
+                source={source}
+                title={videoData.vod_name || title}
+                poster={videoData.vod_pic}
+                type={videoData.type_name}
+                year={videoData.vod_year}
+                size={18}
+                isPremium={isPremium}
               />
-            </div>
-
-          <div className={`grid gap-6 lg:grid-cols-3 lg:items-start ${playerGridClass}`}>
-            {/* Video Player Section */}
-            <div className="lg:col-span-2 xl:col-span-1 space-y-6">
-              <div className="sm:mx-0">
-                <VideoPlayer
-                  playUrl={playUrl}
-                  videoId={videoId || undefined}
-                  currentEpisode={currentEpisode}
-                  onBack={() => router.back()}
-                  totalEpisodes={videoData?.episodes?.length || 0}
-                  onNextEpisode={handleNextEpisode}
-                  isReversed={isReversed}
-                  isPremium={isPremium}
-                  videoTitle={videoData?.vod_name || title || ''}
-                  episodeName={videoData?.episodes?.[currentEpisode]?.name || ''}
-                  externalTimeRef={playerTimeRef}
-                  onResolutionDetected={handleResolutionDetected}
-                />
-              </div>
-              <div className="hidden lg:block">
-                <VideoMetadata
-                  videoData={videoData}
-                  source={source}
-                  title={title}
-                />
-              </div>
-
-              {/* Favorite Button for current video */}
-              {videoData && videoId && (
-                <div className="flex items-center gap-3 mt-4">
-                  <FavoriteButton
-                    videoId={videoId}
-                    source={source}
-                    title={videoData.vod_name || title || '未知视频'}
-                    poster={videoData.vod_pic}
-                    type={videoData.type_name}
-                    year={videoData.vod_year}
-                    sourceMap={Object.fromEntries(
-                      (groupedSources.length > 0 ? groupedSources : [{ id: videoId, source }]).map((item) => [item.source, item.id])
-                    )}
-                    size={20}
-                    isPremium={isPremium}
-                  />
-                  <span className="text-sm text-[var(--text-color-secondary)]">
-                    收藏这个视频
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Sidebar with sticky wrapper — top offset matches navbar height for alignment */}
-            <div className="lg:col-span-1">
-              <div className="lg:sticky lg:top-28 space-y-6">
-                {/* Mobile Tabs */}
-                <SegmentedControl
-                  options={[
-                    { label: '选集', value: 'episodes' },
-                    { label: '简介', value: 'info' },
-                  ]}
-                  value={activeTab}
-                  onChange={setActiveTab}
-                  className="lg:hidden mb-4"
-                />
-
-                {/* Info Tab Content - Mobile Only */}
-                <div className={activeTab !== 'info' ? 'hidden' : 'block lg:hidden'}>
-                  <VideoMetadata
-                    videoData={videoData}
-                    source={source}
-                    title={title}
-                  />
-                </div>
-
-                {/* Episode List with integrated source selector - Visible if desktop OR active mobile tab */}
-                <div className={activeTab !== 'episodes' ? 'hidden lg:block' : 'block'}>
-                  <EpisodeList
-                    episodes={videoData?.episodes || null}
-                    currentEpisode={currentEpisode}
-                    isReversed={isReversed}
-                    onEpisodeClick={handleEpisodeClick}
-                    onToggleReverse={handleToggleReverse}
-                    sources={groupedSources.length > 0 ? groupedSources : undefined}
-                    currentSource={currentSourceId || source || ''}
-                    currentResolution={detectedResolution}
-                    sourceResolutions={sourceResolutions}
-                    sourceSectionCollapsed={isSourceSectionCollapsed}
-                    onSourceSectionCollapseChange={setIsSourceSectionCollapsed}
-                    episodeSectionCollapsed={isEpisodeSectionCollapsed}
-                    onEpisodeSectionCollapseChange={setIsEpisodeSectionCollapsed}
-                    onSourceChange={(newSource) => {
-                      const params = new URLSearchParams();
-                      params.set('id', String(newSource.id));
-                      params.set('source', newSource.source);
-                      params.set('title', title || '');
-                      // Preserve current episode index
-                      params.set('episode', currentEpisode.toString());
-                      // Preserve playback position for seamless source switch
-                      if (playerTimeRef.current > 1) {
-                        params.set('t', Math.floor(playerTimeRef.current).toString());
-                      }
-                      // Store all known sources using short gs key
-                      const allSources = groupedSources.length > 0 ? groupedSources : [];
-                      if (allSources.length > 1) {
-                        const newKey = storeGroupedSources(allSources);
-                        if (newKey) params.set('gs', newKey);
-                      } else if (gsKey) {
-                        params.set('gs', gsKey);
-                      }
-                      if (isPremium) {
-                        params.set('premium', '1');
-                      }
-                      setCurrentSourceId(newSource.source);
-                      router.replace(`/player?${params.toString()}`, { scroll: false });
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
+            )}
           </div>
-          </div>
-        )}
+
+          <VideoMetadata
+            videoData={videoData}
+            source={source}
+            title={title}
+          />
+        </div>
       </main>
 
-      {/* Favorites Sidebar - Left */}
       <FavoritesSidebar isPremium={isPremium} />
     </div>
   );
@@ -575,8 +277,8 @@ function PlayerContent() {
 export default function PlayerPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg-color)]">
-        <div className="animate-spin rounded-full h-16 w-16 border-4 border-[var(--accent-color)] border-t-transparent"></div>
+      <div className="min-h-screen flex items-center justify-center bg-[#121212]">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-pink-500 border-t-transparent"></div>
       </div>
     }>
       <PlayerContent />

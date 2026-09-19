@@ -25,7 +25,7 @@ export function Card({ children, className = '', hover = true, blur = true, onCl
     shadow-[0_2px_8px_var(--shadow-color)] md:shadow-[var(--shadow-md)]
     border
     border-[var(--glass-border)]
-    p-4 md:p-6
+    p-2.5 md:p-3.5
     relative
     ${hoverStyles}
     ${className}

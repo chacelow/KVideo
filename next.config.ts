@@ -4,7 +4,7 @@ import { getLanAllowedDevOrigins } from "./lib/config/lan-access";
 const lanAllowedDevOrigins = getLanAllowedDevOrigins();
 
 const nextConfig: NextConfig = {
-  ...(lanAllowedDevOrigins.length > 0 ? { allowedDevOrigins: lanAllowedDevOrigins } : {}),
+  allowedDevOrigins: ['127.0.0.1', 'localhost', '127.0.0.1:8999', 'localhost:8999', '0.0.0.0:8999', ...lanAllowedDevOrigins],
 
   // Performance optimizations
   reactStrictMode: true,
@@ -15,7 +15,7 @@ const nextConfig: NextConfig = {
     removeConsole: process.env.NODE_ENV === 'production',
   },
 
-  output: 'standalone',
+// output: 'standalone',
   outputFileTracingRoot: __dirname,
   turbopack: {
     root: __dirname,
@@ -23,6 +23,14 @@ const nextConfig: NextConfig = {
 
   images: {
     remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+      {
+        protocol: 'http',
+        hostname: '**',
+      },
       // Douban images
       {
         protocol: 'https',

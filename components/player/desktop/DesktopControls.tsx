@@ -2,7 +2,8 @@ import React from 'react';
 import { DesktopProgressBar } from './DesktopProgressBar';
 import { DesktopLeftControls } from './DesktopLeftControls';
 import { DesktopRightControls } from './DesktopRightControls';
-
+import type { VideoResolutionInfo } from '../hooks/useVideoResolution';
+import type { SourceItem } from './SourceResolutionMenu';
 interface DesktopControlsProps {
     showControls: boolean;
     isPlaying: boolean;
@@ -37,6 +38,17 @@ interface DesktopControlsProps {
     onProgressMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
     onProgressTouchStart: (e: React.TouchEvent<HTMLDivElement>) => void;
     formatTime: (seconds: number) => string;
+    videoResolution?: VideoResolutionInfo | null;
+    currentSource?: string;
+    sources?: SourceItem[];
+    latencies?: Record<string, number>;
+    totalEpisodes?: number;
+    currentEpisode?: number;
+    onSelectSource?: (source: SourceItem) => void;
+    onEpisodeClick?: (index: number) => void;
+    isPremium?: boolean;
+    isProxied?: boolean;
+    onCopyLink?: (type?: 'original' | 'proxy') => void;
 }
 
 export function DesktopControls(props: DesktopControlsProps) {

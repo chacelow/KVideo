@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { VideoCard } from './VideoCard';
 import { VideoGroupCard, GroupedVideo } from './VideoGroupCard';
 import { settingsStore } from '@/lib/store/settings-store';
+import { storeGroupedSources } from '@/lib/utils/grouped-sources-cache';
 import { Video } from '@/lib/types';
 import { useResolutionProbe } from '@/lib/hooks/useResolutionProbe';
 
@@ -143,6 +144,7 @@ export const VideoGrid = memo(function VideoGrid({
   }, [activeCardId]);
 
   // Normal mode items
+  // Normal mode items (自动将本次搜索中同名多源打包，彻底解决单一片源痛点)
   const videoItems = useMemo(() => {
     if (displayMode === 'grouped') return [];
 
@@ -153,17 +155,38 @@ export const VideoGrid = memo(function VideoGrid({
         title: video.vod_name,
       };
 
+      // 跨源同名自动聚合
+      const cleanA = video.vod_name.toLowerCase().replace(/[\s\p{P}]/gu, '');
+      const matchedOthers = videos.filter((v) => {
+        const cleanB = v.vod_name.toLowerCase().replace(/[\s\p{P}]/gu, '');
+        return cleanA === cleanB || cleanA.includes(cleanB) || cleanB.includes(cleanA);
+      });
+
+      if (matchedOthers.length > 1) {
+        const groupData = matchedOthers.map((v) => ({
+          id: v.vod_id,
+          source: v.source,
+          sourceName: v.sourceName,
+          latency: latencies[v.source] ?? v.latency,
+          pic: v.vod_pic,
+          typeName: v.type_name,
+          remarks: v.vod_remarks,
+        }));
+        const cacheKey = storeGroupedSources(groupData);
+        if (cacheKey) {
+          params.gs = cacheKey;
+        }
+      }
+
       if (isPremium) {
         params.premium = '1';
       }
 
       const videoUrl = `/player?${new URLSearchParams(params).toString()}`;
-
       const cardId = `${video.vod_id}-${index}`;
-
       return { video, videoUrl, cardId };
     });
-  }, [videos, displayMode, isPremium]);
+  }, [videos, displayMode, isPremium, latencies]);
 
   // Grouped mode items
   const groupItems = useMemo(() => {

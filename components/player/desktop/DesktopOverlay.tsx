@@ -88,22 +88,6 @@ export function DesktopOverlay({
 
     return (
         <>
-            {/* More Menu (Top Left) - Moved slightly down and lower z-index to stay below navbar */}
-            <div className={`absolute top-8 left-6 z-40 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`} style={{ pointerEvents: showControls ? 'auto' : 'none' }}>
-                <DesktopMoreMenu
-                    showMoreMenu={showMoreMenu}
-                    isPremium={isPremium}
-                    isProxied={isProxied}
-                    onToggleMoreMenu={onToggleMoreMenu}
-                    onMouseEnter={onMoreMenuMouseEnter}
-                    onMouseLeave={onMoreMenuMouseLeave}
-                    onCopyLink={onCopyLink}
-                    webFullscreenSize={webFullscreenSize}
-                    onCycleWebFullscreenSize={onCycleWebFullscreenSize}
-                    containerRef={containerRef}
-                    isRotated={isRotated}
-                />
-            </div>
 
             {isFullscreen && fullscreenClock && (
                 <div
@@ -121,20 +105,6 @@ export function DesktopOverlay({
                 </div>
             )}
 
-            {/* Speed Menu (Top Right) - Moved slightly down and lower z-index */}
-            <div className={`absolute top-8 right-6 z-40 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`} style={{ pointerEvents: showControls ? 'auto' : 'none' }}>
-                <DesktopSpeedMenu
-                    showSpeedMenu={showSpeedMenu}
-                    playbackRate={playbackRate}
-                    speeds={speeds}
-                    onSpeedChange={onSpeedChange}
-                    onToggleSpeedMenu={onToggleSpeedMenu}
-                    onMouseEnter={onSpeedMenuMouseEnter}
-                    onMouseLeave={onSpeedMenuMouseLeave}
-                    containerRef={containerRef}
-                    isRotated={isRotated}
-                />
-            </div>
 
             {/* Loading Spinner - Glass Effect */}
             {isLoading && (

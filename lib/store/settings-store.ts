@@ -134,22 +134,22 @@ function getDefaultAppSettings(): AppSettings {
     skipOutroSeconds: 0,
     seekStepSeconds: DEFAULT_SEEK_STEP_SECONDS,
     showModeIndicator: false,
-    adFilter: false,
+    adFilter: true,
     adFilterMode: 'heuristic',
     adKeywords: [],
-    realtimeLatency: false,
-    searchDisplayMode: 'normal',
+    realtimeLatency: true,
+    searchDisplayMode: 'grouped',
     episodeReverseOrder: false,
     fullscreenType: 'auto',
     proxyMode: 'retry',
     rememberScrollPosition: true,
     personalizedRecommendations: true,
     videoTogetherEnabled: false,
-    danmakuEnabled: false,
-    danmakuApiUrl: process.env.NEXT_PUBLIC_DANMAKU_API_URL || '',
-    danmakuOpacity: 0.7,
+    danmakuEnabled: true,
+    danmakuApiUrl: process.env.NEXT_PUBLIC_DANMAKU_API_URL || 'http://127.0.0.1:9321/api/v2',
+    danmakuOpacity: 0.75,
     danmakuFontSize: 20,
-    danmakuDisplayArea: 0.5,
+    danmakuDisplayArea: 0.75,
     locale: 'zh-CN',
     blockedCategories: [],
   };
@@ -217,8 +217,11 @@ export const settingsStore = {
       });
 
       // Filter out invalid sources (missing baseUrl etc)
-      const validSources = (Array.isArray(parsed.sources) ? parsed.sources : getDefaultSources())
-        .filter((s: any) => s && s.id && s.name && s.baseUrl);
+      // 如果 parsed.sources 为空，强制使用 getDefaultSources()，防止旧缓存导致空源
+      const rawSources = Array.isArray(parsed.sources) && parsed.sources.length > 0
+        ? parsed.sources
+        : getDefaultSources();
+      const validSources = rawSources.filter((s: any) => s && s.id && s.name && s.baseUrl);
 
       const validPremiumSources = (Array.isArray(parsed.premiumSources) ? parsed.premiumSources : getDefaultPremiumSources())
         .filter((s: any) => s && s.id && s.name && s.baseUrl);
@@ -238,22 +241,22 @@ export const settingsStore = {
         skipOutroSeconds: typeof parsed.skipOutroSeconds === 'number' ? parsed.skipOutroSeconds : 0,
         seekStepSeconds: normalizeSeekStepSeconds(parsed.seekStepSeconds),
         showModeIndicator: parsed.showModeIndicator !== undefined ? parsed.showModeIndicator : false,
-        adFilter: parsed.adFilter !== undefined ? parsed.adFilter : false,
+        adFilter: parsed.adFilter !== undefined ? parsed.adFilter : true,
         adFilterMode: parsed.adFilterMode || 'heuristic',
         adKeywords: Array.isArray(parsed.adKeywords) ? parsed.adKeywords : [],
-        realtimeLatency: parsed.realtimeLatency !== undefined ? parsed.realtimeLatency : false,
-        searchDisplayMode: parsed.searchDisplayMode === 'grouped' ? 'grouped' : 'normal',
+        realtimeLatency: parsed.realtimeLatency !== undefined ? parsed.realtimeLatency : true,
+        searchDisplayMode: parsed.searchDisplayMode === 'normal' ? 'normal' : 'grouped',
         episodeReverseOrder: parsed.episodeReverseOrder !== undefined ? parsed.episodeReverseOrder : false,
         fullscreenType: (parsed.fullscreenType === 'window' || parsed.fullscreenType === 'native' || parsed.fullscreenType === 'auto') ? parsed.fullscreenType : 'auto',
         proxyMode: (parsed.proxyMode === 'retry' || parsed.proxyMode === 'none' || parsed.proxyMode === 'always') ? parsed.proxyMode : 'retry',
         rememberScrollPosition: parsed.rememberScrollPosition !== undefined ? parsed.rememberScrollPosition : true,
         personalizedRecommendations: parsed.personalizedRecommendations !== undefined ? parsed.personalizedRecommendations : true,
         videoTogetherEnabled: parsed.videoTogetherEnabled !== undefined ? parsed.videoTogetherEnabled : false,
-        danmakuEnabled: parsed.danmakuEnabled !== undefined ? parsed.danmakuEnabled : false,
-        danmakuApiUrl: typeof parsed.danmakuApiUrl === 'string' ? (parsed.danmakuApiUrl || process.env.NEXT_PUBLIC_DANMAKU_API_URL || '') : (process.env.NEXT_PUBLIC_DANMAKU_API_URL || ''),
-        danmakuOpacity: typeof parsed.danmakuOpacity === 'number' ? parsed.danmakuOpacity : 0.7,
+        danmakuEnabled: parsed.danmakuEnabled !== undefined ? parsed.danmakuEnabled : true,
+        danmakuApiUrl: typeof parsed.danmakuApiUrl === 'string' ? (parsed.danmakuApiUrl || process.env.NEXT_PUBLIC_DANMAKU_API_URL || 'http://127.0.0.1:9321/api/v2') : (process.env.NEXT_PUBLIC_DANMAKU_API_URL || 'http://127.0.0.1:9321/api/v2'),
+        danmakuOpacity: typeof parsed.danmakuOpacity === 'number' ? parsed.danmakuOpacity : 0.75,
         danmakuFontSize: typeof parsed.danmakuFontSize === 'number' ? parsed.danmakuFontSize : 20,
-        danmakuDisplayArea: typeof parsed.danmakuDisplayArea === 'number' ? parsed.danmakuDisplayArea : 0.5,
+        danmakuDisplayArea: typeof parsed.danmakuDisplayArea === 'number' ? parsed.danmakuDisplayArea : 0.75,
         locale: parsed.locale === 'zh-TW' ? 'zh-TW' : 'zh-CN',
         blockedCategories: Array.isArray(parsed.blockedCategories) ? parsed.blockedCategories : [],
       };

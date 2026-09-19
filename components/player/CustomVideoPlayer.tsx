@@ -1,7 +1,8 @@
 'use client';
 
 import { DesktopVideoPlayer } from './DesktopVideoPlayer';
-
+import type { SourceItem } from './desktop/SourceResolutionMenu';
+import type { VideoResolutionInfo } from './hooks/useVideoResolution';
 
 interface CustomVideoPlayerProps {
   src: string;
@@ -10,24 +11,21 @@ interface CustomVideoPlayerProps {
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   initialTime?: number;
   shouldAutoPlay?: boolean;
-  // Episode navigation props for auto-skip/auto-next
   totalEpisodes?: number;
   currentEpisodeIndex?: number;
   onNextEpisode?: () => void;
   isReversed?: boolean;
-  // Danmaku props
   videoTitle?: string;
   episodeName?: string;
   isPremium?: boolean;
-  // Resolution callback
-  onResolutionDetected?: (info: import('./hooks/useVideoResolution').VideoResolutionInfo) => void;
+  onResolutionDetected?: (info: VideoResolutionInfo) => void;
+  // 新增：内置选源与选集
+  sources?: SourceItem[];
+  currentSource?: string;
+  onSelectSource?: (source: SourceItem) => void;
+  onEpisodeClick?: (index: number) => void;
 }
 
-/**
- * Smart Video Player that renders different versions based on device
- * - Mobile/Tablet: Optimized touch controls, double-tap gestures, orientation lock
- * - Desktop: Full-featured player with hover interactions
- */
 export function CustomVideoPlayer(props: CustomVideoPlayerProps) {
   return <DesktopVideoPlayer {...props} />;
 }

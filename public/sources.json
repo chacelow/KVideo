@@ -1,7 +1,4 @@
-import type { VideoSource } from "@/lib/types";
-
-// 由 KVideo 动态自检引擎自动生成于 2026-09-19 14:20:00
-export const DEFAULT_SOURCES: VideoSource[] = [
+[
   {
     "id": "feifan",
     "name": "非凡影视",
@@ -92,4 +89,4 @@ export const DEFAULT_SOURCES: VideoSource[] = [
     "priority": 9,
     "group": "normal"
   }
-];
+]

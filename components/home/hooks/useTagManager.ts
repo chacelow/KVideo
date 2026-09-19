@@ -20,10 +20,11 @@ const ensureDefaultTag = (tags: Tag[]) => {
 };
 
 export function useTagManager() {
-    const [contentType, setContentType] = useState<'movie' | 'tv'>(() => {
-        if (typeof window === 'undefined') return 'movie';
+    const [contentType, setContentType] = useState<'anime' | 'movie' | 'tv'>(() => {
+        if (typeof window === 'undefined') return 'anime';
         const saved = localStorage.getItem('kvideo_default_content_type');
-        return saved === 'tv' ? 'tv' : 'movie';
+        if (saved === 'tv' || saved === 'movie') return saved;
+        return 'anime';
     });
     const [selectedTag, setSelectedTag] = useState(DEFAULT_TAG.id);
     const [tags, setTags] = useState<Tag[]>([]);

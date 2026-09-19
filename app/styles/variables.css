@@ -23,7 +23,9 @@
     --shadow-color-dark: rgba(0, 0, 0, 0.3);
 
     /* Universal Variables */
-    --radius-2xl: 1.5rem;
+    --radius-2xl: 0.5rem;
+    --radius-xl: 0.375rem;
+    --radius-lg: 0.25rem;
     --radius-full: 9999px;
     --shadow-sm: 0 1px 2px var(--shadow-color);
     --shadow-md: 0 4px 6px var(--shadow-color);

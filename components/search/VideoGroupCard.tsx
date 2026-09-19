@@ -1,18 +1,7 @@
 'use client';
 
-/**
- * VideoGroupCard - Displays grouped videos with same name as single card
- * Following Liquid Glass design system
- */
-
 import { memo, useMemo } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { Icons } from '@/components/ui/Icon';
-import { LatencyBadge } from '@/components/ui/LatencyBadge';
-import { FavoriteButton } from '@/components/favorites/FavoriteButton';
 import { Video } from '@/lib/types';
 import { htmlToText } from '@/lib/utils/html';
 import { parseVideoTitle } from '@/lib/utils/video';
@@ -20,238 +9,146 @@ import { storeGroupedSources } from '@/lib/utils/grouped-sources-cache';
 import type { ResolutionInfo } from '@/lib/hooks/useResolutionProbe';
 
 export interface GroupedVideo {
-    /** Representative video (lowest latency) */
-    representative: Video;
-    /** All videos in this group */
-    videos: Video[];
-    /** Group name (vod_name) */
-    name: string;
+  representative: Video;
+  videos: Video[];
+  name: string;
 }
 
 interface VideoGroupCardProps {
-    group: GroupedVideo;
-    cardId: string;
-    isActive: boolean;
-    onCardClick: (e: React.MouseEvent, cardId: string, videoUrl: string) => void;
-    isPremium?: boolean;
-    latencies?: Record<string, number>;
-    resolution?: ResolutionInfo | null;
-    isProbing?: boolean;
+  group: GroupedVideo;
+  cardId: string;
+  isActive: boolean;
+  onCardClick: (e: React.MouseEvent, cardId: string, videoUrl: string) => void;
+  isPremium?: boolean;
+  latencies?: Record<string, number>;
+  resolution?: ResolutionInfo | null;
+  isProbing?: boolean;
 }
 
 export const VideoGroupCard = memo<VideoGroupCardProps>(({
-    group,
-    cardId,
-    isActive,
-    onCardClick,
-    isPremium = false,
-    latencies = {},
-    resolution,
-    isProbing = false,
+  group,
+  cardId,
+  onCardClick,
+  isPremium = false,
+  latencies = {},
+  resolution,
 }) => {
-    const { representative, videos, name } = group;
-    const displayRemarks = useMemo(() => {
-        const preferredVideo = videos.find((video) => video === representative && video.vod_remarks)
-            ?? videos.find((video) => video.vod_remarks);
-        return htmlToText(preferredVideo?.vod_remarks);
-    }, [representative, videos]);
+  const { representative, videos } = group;
 
-    // Best latency from the group, preferring real-time updates
-    const bestLatency = useMemo(() => {
-        const currentLatencies = videos.map(v => latencies[v.source] ?? v.latency).filter(l => l !== undefined) as number[];
-        return currentLatencies.length > 0 ? Math.min(...currentLatencies) : undefined;
-    }, [videos, latencies]);
+  const displayRemarks = useMemo(() => {
+    const preferred = videos.find((v) => v === representative && v.vod_remarks)
+      ?? videos.find((v) => v.vod_remarks);
+    return htmlToText(preferred?.vod_remarks);
+  }, [representative, videos]);
 
-    // Generate URL with grouped sources stored in sessionStorage (avoids long URLs / 414 errors)
-    const videoUrl = useMemo(() => {
-        const params = new URLSearchParams({
-            id: String(representative.vod_id),
-            source: representative.source,
-            title: representative.vod_name,
-        });
+  // 最低延迟
+  const bestLatency = useMemo(() => {
+    const currentLatencies = videos
+      .map((v) => latencies[v.source] ?? v.latency)
+      .filter((l) => l !== undefined) as number[];
+    return currentLatencies.length > 0 ? Math.min(...currentLatencies) : undefined;
+  }, [videos, latencies]);
 
-        // Store group data in sessionStorage and pass short key in URL
-        if (videos.length > 1) {
-            const groupData = videos.map(v => ({
-                id: v.vod_id,
-                source: v.source,
-                sourceName: v.sourceName,
-                latency: v.latency,
-                pic: v.vod_pic,
-                typeName: v.type_name,
-                remarks: v.vod_remarks,
-            }));
-            const cacheKey = storeGroupedSources(groupData);
-            if (cacheKey) {
-                params.set('gs', cacheKey);
-            }
-        }
+  // 生成跳转 URL，将所有聚合源打包入库
+  const videoUrl = useMemo(() => {
+    const params = new URLSearchParams({
+      id: String(representative.vod_id),
+      source: representative.source,
+      title: representative.vod_name,
+    });
 
-        if (isPremium) {
-            params.set('premium', '1');
-        }
+    if (videos.length > 1) {
+      const groupData = videos.map((v) => ({
+        id: v.vod_id,
+        source: v.source,
+        sourceName: v.sourceName,
+        latency: latencies[v.source] ?? v.latency,
+        pic: v.vod_pic,
+        typeName: v.type_name,
+        remarks: v.vod_remarks,
+      }));
+      const cacheKey = storeGroupedSources(groupData);
+      if (cacheKey) {
+        params.set('gs', cacheKey);
+      }
+    }
 
-        return `/player?${params.toString()}`;
-    }, [representative, videos, isPremium]);
+    if (isPremium) {
+      params.set('premium', '1');
+    }
 
-    return (
-        <div
-            style={{
-                position: 'relative',
-                zIndex: 1,
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.zIndex = '100')}
-            onMouseLeave={(e) => (e.currentTarget.style.zIndex = '1')}
-        >
-            <Link
-                key={cardId}
-                href={videoUrl}
-                onClick={(e) => onCardClick(e, cardId, videoUrl)}
-                role="listitem"
-                aria-label={`${name} - ${videos.length} 个源${representative.vod_remarks ? ` - ${representative.vod_remarks}` : ''}`}
-                prefetch={false}
-                data-focusable
-                className="group cursor-pointer hover:translate-y-[-2px] transition-transform duration-200 ease-out block h-full"
-            >
-                <Card
-                    className="p-0 flex flex-col h-full bg-[var(--bg-color)]/50 backdrop-blur-none saturate-100 shadow-sm border-[var(--glass-border)] hover:shadow-lg transition-shadow"
-                    hover={false}
-                    blur={false}
-                    style={{
-                        backfaceVisibility: 'hidden',
-                    }}
-                >
-                    {/* Poster */}
-                    <div className="relative aspect-[2/3] bg-[color-mix(in_srgb,var(--glass-bg)_50%,transparent)] rounded-[var(--radius-2xl)] overflow-hidden">
-                        {representative.vod_pic ? (
-                            <Image
-                                src={representative.vod_pic}
-                                alt={name}
-                                fill
-                                className="object-cover rounded-[var(--radius-2xl)]"
-                                sizes="(max-width: 640px) 33vw, (max-width: 1024px) 20vw, 16vw"
-                                loading="eager"
-                                unoptimized
-                                referrerPolicy="no-referrer"
-                                onError={(e) => {
-                                    const target = e.currentTarget as HTMLImageElement;
-                                    target.style.opacity = '0';
-                                }}
-                            />
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                                <Icons.Film size={64} className="text-[var(--text-color-secondary)]" />
-                            </div>
-                        )}
+    return `/player?${params.toString()}`;
+  }, [representative, videos, latencies, isPremium]);
 
-                        {/* Fallback Icon - visible when image fails */}
-                        <div className="absolute inset-0 flex flex-col items-center justify-center -z-10 gap-2">
-                            <Icons.Film size={48} className="text-[var(--text-color-secondary)] opacity-40" />
-                            <span className="text-xs text-[var(--text-color-secondary)] opacity-60 px-2 text-center line-clamp-2">{name}</span>
-                        </div>
+  const { cleanTitle } = parseVideoTitle(representative.vod_name);
 
-                        {/* Badge Container */}
-                        <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between gap-1">
-                            {/* Source count badge */}
-                            <Badge variant="primary" className="bg-[var(--accent-color)] flex-shrink-0">
-                                <Icons.Layers size={12} className="mr-1" />
-                                {videos.length} 源
-                            </Badge>
+  // 聚合画质标签
+  const resText = resolution?.label || (
+    videos.some((v) => /(2160|4k|uhd)/i.test(`${v.vod_name} ${v.vod_remarks}`)) ? '4K' :
+    videos.some((v) => /(1080|fhd|蓝光)/i.test(`${v.vod_name} ${v.vod_remarks}`)) ? '1080P' : '720P'
+  );
 
-                            {bestLatency !== undefined && (
-                                <LatencyBadge latency={bestLatency} className="flex-shrink-0" />
-                            )}
-                        </div>
+  return (
+    <Link
+      key={cardId}
+      href={videoUrl}
+      onClick={(e) => onCardClick(e, cardId, videoUrl)}
+      className="group flex flex-col cursor-pointer transition-transform duration-200 hover:-translate-y-1 block w-full select-none"
+    >
+      {/* 纯净海报区域 (完全无卡片外框，B站同款紧凑海报) */}
+      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-md bg-[#1f2022] shadow-sm group-hover:shadow-lg transition-all">
+        <img
+          src={representative.vod_pic || '/placeholder-poster.svg'}
+          alt={representative.vod_name}
+          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+          loading="lazy"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = '/placeholder-poster.svg';
+          }}
+        />
 
-                        {/* Favorite Button - Top Right */}
-                        <div className={`absolute top-2 right-2 z-20 transition-opacity duration-200 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                            <FavoriteButton
-                                videoId={representative.vod_id}
-                                source={representative.source}
-                                title={name}
-                                poster={representative.vod_pic}
-                                sourceName={representative.sourceName}
-                                type={representative.type_name}
-                                year={representative.vod_year}
-                                remarks={representative.vod_remarks}
-                                sourceMap={Object.fromEntries(videos.map((video) => [video.source, video.vod_id]))}
-                                size={16}
-                                className="shadow-md"
-                                isPremium={isPremium}
-                            />
-                        </div>
-
-                        {/* Overlay */}
-                        <div
-                            className={`absolute inset-0 bg-black/60 transition-opacity duration-300 ${isActive ? 'opacity-100 lg:opacity-0 lg:group-hover:opacity-100' : 'opacity-0 lg:group-hover:opacity-100'
-                                }`}
-                            style={{
-                                willChange: 'opacity',
-                            }}
-                        >
-                            <div className="absolute bottom-0 left-0 right-0 p-3">
-                                {isActive && (
-                                    <div className="lg:hidden text-white/90 text-xs mb-2 font-medium">
-                                        再次点击播放 →
-                                    </div>
-                                )}
-                                {representative.type_name && (
-                                    <Badge variant="secondary" className="text-xs mb-2">
-                                        {representative.type_name}
-                                    </Badge>
-                                )}
-                                {representative.vod_year && (
-                                    <div className="flex items-center gap-1 text-white/80 text-xs">
-                                        <Icons.Calendar size={12} />
-                                        <span>{representative.vod_year}</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Info */}
-                    <div className="p-3 flex-1 flex flex-col">
-                        {(() => {
-                            const { cleanTitle } = parseVideoTitle(name);
-
-                            return (
-                                <>
-                                    <h4 className="font-semibold text-sm text-[var(--text-color)] line-clamp-2 min-h-[2.5rem] mb-1">
-                                        {cleanTitle}
-                                    </h4>
-                                    {displayRemarks && (
-                                        <p
-                                            className="text-xs text-[var(--text-color-secondary)] mt-1 line-clamp-1"
-                                            title={displayRemarks}
-                                        >
-                                            {displayRemarks}
-                                        </p>
-                                    )}
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                        {resolution ? (
-                                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white ${resolution.color}`}>
-                                                {resolution.label}
-                                            </span>
-                                        ) : isProbing ? (
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white/50 bg-gray-500/50 animate-pulse">
-                                                ...
-                                            </span>
-                                        ) : null}
-                                    </div>
-                                    {representative.vod_lang && (
-                                        <p className="text-xs text-[var(--text-color-secondary)] mt-1">
-                                            {representative.vod_lang}
-                                        </p>
-                                    )}
-                                </>
-                            );
-                        })()}
-                    </div>
-                </Card>
-            </Link>
+        {/* 右上角：聚合线路与画质双角标 */}
+        <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1">
+          {videos.length > 1 && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm text-white bg-blue-600/90 backdrop-blur-md">
+              {videos.length}线聚合
+            </span>
+          )}
+          {resText && (
+            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded shadow-sm text-white ${
+              resText === '4K' ? 'bg-amber-500/90' : 'bg-pink-500/90'
+            }`}>
+              {resText}
+            </span>
+          )}
         </div>
-    );
+
+        {/* 底部半透明阴影条：展示更新集数与最佳延迟 */}
+        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent pt-6 pb-1.5 px-2 flex items-center justify-between text-[11px] text-white/90">
+          <span className="truncate font-medium">{displayRemarks || '正片'}</span>
+          {bestLatency !== undefined && (
+            <span className={`text-[10px] font-bold shrink-0 ml-1 ${
+              bestLatency < 500 ? 'text-emerald-400' : bestLatency < 1000 ? 'text-amber-400' : 'text-rose-400'
+            }`}>
+              {bestLatency}ms
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 底部两行纯文本信息 */}
+      <div className="mt-2 space-y-0.5 px-0.5">
+        <h4 className="text-xs sm:text-sm font-medium text-[#e3e5e7] truncate group-hover:text-pink-400 transition-colors" title={cleanTitle}>
+          {cleanTitle}
+        </h4>
+        <div className="flex items-center gap-1.5 text-[11px] text-[#9499a0] truncate">
+          <span>{representative.type_name || '动漫'}</span>
+          {representative.vod_year && <span>· {representative.vod_year}</span>}
+          <span className="text-pink-400 font-semibold">· {videos.length}个源秒切</span>
+        </div>
+      </div>
+    </Link>
+  );
 });
 
 VideoGroupCard.displayName = 'VideoGroupCard';

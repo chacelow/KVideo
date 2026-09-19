@@ -42,3 +42,8 @@ next-env.d.ts
 
 # unused/generated files
 contrast-test-results.json
+
+*.log
+kvideo.log
+kvideo.err.log
+.env.local

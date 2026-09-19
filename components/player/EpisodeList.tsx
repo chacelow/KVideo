@@ -119,11 +119,18 @@ export function EpisodeList({
   const sortedSources = useMemo(() => {
     if (!sources) return [];
     return [...sources].sort((a, b) => {
+      const resA = getResBadge(a, a.source === currentSource);
+      const resB = getResBadge(b, b.source === currentSource);
+      const scoreA = resA?.label?.includes('4K') ? 4000 : resA?.label?.includes('1080') ? 1080 : 0;
+      const scoreB = resB?.label?.includes('4K') ? 4000 : resB?.label?.includes('1080') ? 1080 : 0;
+      if (scoreA !== scoreB) {
+        return scoreB - scoreA;
+      }
       const latA = mergedLatencies[a.source] ?? a.latency ?? Infinity;
       const latB = mergedLatencies[b.source] ?? b.latency ?? Infinity;
       return latA - latB;
     });
-  }, [mergedLatencies, sources]);
+  }, [currentSource, getResBadge, mergedLatencies, sources]);
 
   const isSourceListOpen = !sourceSectionCollapsed && sourceExpanded;
   const forceExpandedForCurrentSource = !!currentSource && shouldExpandForCurrentSource(sortedSources, currentSource);
@@ -690,7 +697,7 @@ export function EpisodeList({
             ref={listRef}
             className={`max-h-[400px] sm:max-h-[600px] overflow-y-auto pr-1 ${
               episodeLayout === 'grid'
-                ? 'grid grid-cols-3 sm:grid-cols-4 gap-2'
+                ? 'grid grid-cols-2 sm:grid-cols-3 gap-2'
                 : 'space-y-2'
             }`}
             role="radiogroup"
@@ -717,26 +724,26 @@ export function EpisodeList({
                     role="radio"
                     aria-checked={isCurrentEpisode}
                     aria-current={isCurrentEpisode ? 'true' : undefined}
+                    title={episode.name || `第 ${originalIndex + 1} 集`}
                     aria-label={`${episode.name || `第 ${originalIndex + 1} 集`}${isCurrentEpisode ? '，当前播放' : ''}`}
                     className={`
-                      rounded-[var(--radius-2xl)] transition-[var(--transition-fluid)] cursor-pointer
+                      rounded-md transition-all cursor-pointer select-none
                       ${isGrid
-                        ? 'px-2 py-2.5 text-center'
-                        : 'w-full px-3 py-2 sm:px-4 sm:py-3 text-left'
+                        ? 'px-2.5 py-2 text-center'
+                        : 'w-full px-3 py-2 text-left'
                       }
                       ${isCurrentEpisode
-                        ? 'bg-[var(--accent-color)] text-white shadow-[0_4px_12px_color-mix(in_srgb,var(--accent-color)_50%,transparent)] brightness-110'
-                        : 'bg-[var(--glass-bg)] hover:bg-[var(--glass-hover)] text-[var(--text-color)] border border-[var(--glass-border)]'
+                        ? 'bg-pink-500 text-white font-bold shadow-md shadow-pink-500/25'
+                        : 'bg-white/[0.06] hover:bg-white/[0.12] text-[#e3e5e7]'
                       }
-                      focus-visible:ring-2 focus-visible:ring-[var(--accent-color)] focus-visible:ring-offset-2
                     `}
                   >
                     <div className={`flex items-center ${isGrid ? 'justify-center gap-1' : 'justify-between'}`}>
-                      <span className={`font-medium ${isGrid ? 'text-xs sm:text-sm truncate' : 'text-sm sm:text-base'}`}>
+                      <span className={`font-medium ${isGrid ? 'text-xs truncate max-w-[120px]' : 'text-sm'}`}>
                         {episode.name || `第 ${originalIndex + 1} 集`}
                       </span>
                       {isCurrentEpisode && !isGrid && (
-                        <Icons.Play size={16} />
+                        <Icons.Play size={14} className="text-white shrink-0" />
                       )}
                     </div>
                   </button>

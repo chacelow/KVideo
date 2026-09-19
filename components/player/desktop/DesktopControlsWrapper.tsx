@@ -2,15 +2,37 @@ import React from 'react';
 import { DesktopControls } from './DesktopControls';
 import { useDesktopPlayerState } from '../hooks/useDesktopPlayerState';
 import { useDesktopPlayerLogic } from '../hooks/useDesktopPlayerLogic';
+import type { VideoResolutionInfo } from '../hooks/useVideoResolution';
+import type { SourceItem } from './SourceResolutionMenu';
 
 interface DesktopControlsWrapperProps {
     src: string;
     data: ReturnType<typeof useDesktopPlayerState>['data'];
     logic: ReturnType<typeof useDesktopPlayerLogic>;
     refs: ReturnType<typeof useDesktopPlayerState>['refs'];
+    videoResolution?: VideoResolutionInfo | null;
+    totalEpisodes?: number;
+    currentEpisode?: number;
+    currentSource?: string;
+    sources?: SourceItem[];
+    onSelectSource?: (source: SourceItem) => void;
+    onEpisodeClick?: (index: number) => void;
 }
 
-export function DesktopControlsWrapper({ src, data, logic, refs }: DesktopControlsWrapperProps) {
+export function DesktopControlsWrapper({
+    src,
+    data,
+    logic,
+    refs,
+    videoResolution,
+    totalEpisodes,
+    currentEpisode,
+    currentSource,
+    sources,
+    onSelectSource,
+    onEpisodeClick
+}: DesktopControlsWrapperProps) {
+
     const {
         isPlaying,
         currentTime,
@@ -80,9 +102,19 @@ export function DesktopControlsWrapper({ src, data, logic, refs }: DesktopContro
             onTogglePictureInPicture={togglePictureInPicture}
             onShowAirPlayMenu={showAirPlayMenu}
             onShowCastMenu={showCastMenu}
+            videoResolution={videoResolution}
+            totalEpisodes={totalEpisodes}
+            currentEpisode={currentEpisode}
+            currentSource={currentSource}
+            sources={sources}
+            onSelectSource={onSelectSource}
+            onEpisodeClick={onEpisodeClick}
+            playbackRate={data.playbackRate}
+            onSpeedChange={logic.changePlaybackSpeed}
             onProgressClick={handleProgressClick}
             onProgressMouseDown={handleProgressMouseDown}
             onProgressTouchStart={handleProgressTouchStart}
+            onCopyLink={logic.handleCopyLink}
             formatTime={formatTime}
         />
     );

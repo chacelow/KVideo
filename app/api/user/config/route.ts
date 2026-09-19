@@ -18,10 +18,11 @@ function redisKey(profileId: string): string {
 }
 
 function syncUnavailableResponse() {
-  return NextResponse.json(
-    { error: 'Server-side sync is not configured on this deployment' },
-    { status: 503 }
-  );
+  return NextResponse.json({
+    success: true,
+    data: null,
+    disabled: true,
+  });
 }
 
 export async function GET(request: NextRequest) {

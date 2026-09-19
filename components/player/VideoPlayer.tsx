@@ -7,6 +7,8 @@ import { CustomVideoPlayer } from './CustomVideoPlayer';
 import { VideoPlayerError } from './VideoPlayerError';
 import { VideoPlayerEmpty } from './VideoPlayerEmpty';
 import { usePlayerSettings } from './hooks/usePlayerSettings';
+import type { SourceItem } from './desktop/SourceResolutionMenu';
+import type { VideoResolutionInfo } from './hooks/useVideoResolution';
 
 interface VideoPlayerProps {
   playUrl: string;
@@ -23,10 +25,12 @@ interface VideoPlayerProps {
   episodeName?: string;
   // Expose current time to parent
   externalTimeRef?: React.MutableRefObject<number>;
-  // Resolution callback
-  onResolutionDetected?: (info: import('./hooks/useVideoResolution').VideoResolutionInfo) => void;
+  onResolutionDetected?: (info: VideoResolutionInfo) => void;
+  sources?: SourceItem[];
+  currentSource?: string;
+  onSelectSource?: (source: SourceItem) => void;
+  onEpisodeClick?: (index: number) => void;
 }
-
 export function VideoPlayer({
   playUrl,
   videoId,
@@ -40,6 +44,10 @@ export function VideoPlayer({
   episodeName,
   externalTimeRef,
   onResolutionDetected,
+  sources,
+  currentSource,
+  onSelectSource,
+  onEpisodeClick,
 }: VideoPlayerProps) {
   const [videoError, setVideoError] = useState<string>('');
   const [useProxy, setUseProxy] = useState(false);
@@ -202,7 +210,7 @@ export function VideoPlayer({
         />
       ) : (
         <CustomVideoPlayer
-          key={`${effectiveUseProxy ? 'proxy' : 'direct'}-${retryCount}-${source}`} // Remount when switching sources, modes, or retrying
+          key={`${effectiveUseProxy ? 'proxy' : 'direct'}-${retryCount}-${source}-ep${currentEpisode}`}
           src={finalPlayUrl}
           onError={handleVideoError}
           onTimeUpdate={handleTimeUpdate}
@@ -216,6 +224,10 @@ export function VideoPlayer({
           episodeName={episodeName}
           isPremium={isPremium}
           onResolutionDetected={onResolutionDetected}
+          sources={sources}
+          currentSource={currentSource}
+          onSelectSource={onSelectSource}
+          onEpisodeClick={onEpisodeClick}
         />
       )}
     </div>

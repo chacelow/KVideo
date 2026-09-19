@@ -87,7 +87,14 @@ async function probeManifestResolution(
     }
   }
 
-  const fallbackHint = extractResolutionHint(targetUrl, m3u8Content) || detailHint;
+  // 严格防虚假宣传：如果文本备注写了 4K 但 m3u8 清单里没有真实 4K 证明，严禁盖戳为 4K
+  let fallbackHint = extractResolutionHint(targetUrl, m3u8Content);
+  if (!fallbackHint && detailHint) {
+    // 仅当非 4K/8K 虚高标签时才允许作为参考提示，避免误导用户
+    if (detailHint.label !== '4K' && detailHint.label !== '8K') {
+      fallbackHint = detailHint;
+    }
+  }
   return {
     resolution: fallbackHint,
     origin: fallbackHint ? 'hint' : 'manifest',

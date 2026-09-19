@@ -8,6 +8,7 @@ import { useAutoSkip } from './hooks/useAutoSkip';
 import { useStallDetection } from './hooks/useStallDetection';
 import { useVideoResolution } from './hooks/useVideoResolution';
 import { DesktopControlsWrapper } from './desktop/DesktopControlsWrapper';
+import type { SourceItem } from './desktop/SourceResolutionMenu';
 import { DesktopOverlayWrapper } from './desktop/DesktopOverlayWrapper';
 import { DanmakuCanvas } from './DanmakuCanvas';
 import { usePlayerSettings } from './hooks/usePlayerSettings';
@@ -72,6 +73,10 @@ interface DesktopVideoPlayerProps {
   isPremium?: boolean;
   // Resolution callback
   onResolutionDetected?: (info: import('./hooks/useVideoResolution').VideoResolutionInfo) => void;
+  sources?: SourceItem[];
+  currentSource?: string;
+  onSelectSource?: (source: SourceItem) => void;
+  onEpisodeClick?: (index: number) => void;
 }
 
 export function DesktopVideoPlayer({
@@ -89,6 +94,10 @@ export function DesktopVideoPlayer({
   episodeName = '',
   isPremium = false,
   onResolutionDetected,
+  sources,
+  currentSource,
+  onSelectSource,
+  onEpisodeClick,
 }: DesktopVideoPlayerProps) {
   const { refs, data, actions } = useDesktopPlayerState();
   const { fullscreenType: settingsFullscreenType } = usePlayerSettings(isPremium);
@@ -399,15 +408,6 @@ export function DesktopVideoPlayer({
             />
           )}
 
-          {/* Video Resolution Badge - follows controls bar visibility */}
-          {videoResolution && (
-            <div className={`absolute top-3 left-3 z-20 pointer-events-none transition-opacity duration-300 ${data.showControls ? 'opacity-80' : 'opacity-0'}`}>
-              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold text-white ${videoResolution.color}`}>
-                {videoResolution.label}
-                <span className="font-normal opacity-80">{videoResolution.width}x{videoResolution.height}</span>
-              </span>
-            </div>
-          )}
 
           <DesktopOverlayWrapper
             data={data}
@@ -460,6 +460,13 @@ export function DesktopVideoPlayer({
               data={data}
               logic={logic}
               refs={refs}
+              videoResolution={videoResolution}
+              totalEpisodes={totalEpisodes}
+              currentEpisode={currentEpisodeIndex}
+              currentSource={currentSource}
+              sources={sources}
+              onSelectSource={onSelectSource}
+              onEpisodeClick={onEpisodeClick}
             />
           </div>
         </div>
