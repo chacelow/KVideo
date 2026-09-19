@@ -4,6 +4,7 @@ import { DesktopLeftControls } from './DesktopLeftControls';
 import { DesktopRightControls } from './DesktopRightControls';
 import type { VideoResolutionInfo } from '../hooks/useVideoResolution';
 import type { SourceItem } from './SourceResolutionMenu';
+import type { UseDanmakuReturn } from '../hooks/useDanmaku';
 interface DesktopControlsProps {
     showControls: boolean;
     isPlaying: boolean;
@@ -49,6 +50,9 @@ interface DesktopControlsProps {
     isPremium?: boolean;
     isProxied?: boolean;
     onCopyLink?: (type?: 'original' | 'proxy') => void;
+    danmaku?: UseDanmakuReturn;
+    onToggleDanmakuSidebar?: () => void;
+    isDanmakuSidebarOpen?: boolean;
 }
 
 export function DesktopControls(props: DesktopControlsProps) {
@@ -61,7 +65,12 @@ export function DesktopControls(props: DesktopControlsProps) {
         onProgressClick,
         onProgressMouseDown,
         onProgressTouchStart,
-        formatTime,
+        formatTime = (s: number) => {
+            if (!s || isNaN(s)) return '00:00';
+            const m = Math.floor(s / 60);
+            const sec = Math.floor(s % 60);
+            return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+        },
     } = props;
 
     return (

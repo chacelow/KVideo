@@ -3,6 +3,7 @@
 import { DesktopVideoPlayer } from './DesktopVideoPlayer';
 import type { SourceItem } from './desktop/SourceResolutionMenu';
 import type { VideoResolutionInfo } from './hooks/useVideoResolution';
+import type { UseDanmakuReturn } from './hooks/useDanmaku';
 
 interface CustomVideoPlayerProps {
   src: string;
@@ -19,11 +20,15 @@ interface CustomVideoPlayerProps {
   episodeName?: string;
   isPremium?: boolean;
   onResolutionDetected?: (info: VideoResolutionInfo) => void;
-  // 新增：内置选源与选集
+  // 内置选源与选集
   sources?: SourceItem[];
   currentSource?: string;
   onSelectSource?: (source: SourceItem) => void;
   onEpisodeClick?: (index: number) => void;
+  // 外部侧边栏弹幕控制器
+  danmaku?: UseDanmakuReturn;
+  isDanmakuSidebarOpen?: boolean;
+  onToggleDanmakuSidebar?: () => void;
 }
 
 export function CustomVideoPlayer(props: CustomVideoPlayerProps) {

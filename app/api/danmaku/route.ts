@@ -24,8 +24,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Normalize base URL (remove trailing slash)
-  const baseUrl = apiUrl.replace(/\/+$/, '');
+  // Normalize base URL (remove trailing slash and strip duplicate /api/v2 if present)
+  const cleanBaseUrl = apiUrl.replace(/\/+$/, '').replace(/\/api\/v2\/?$/, '');
 
   try {
     let targetUrl: string;
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
           { status: 400, headers: CORS_HEADERS }
         );
       }
-      targetUrl = `${baseUrl}/api/v2/search/episodes?anime=${encodeURIComponent(keyword)}`;
+      targetUrl = `${cleanBaseUrl}/api/v2/search/episodes?anime=${encodeURIComponent(keyword)}`;
     } else if (action === 'comments') {
       const episodeId = searchParams.get('episodeId');
       if (!episodeId) {
@@ -47,10 +47,19 @@ export async function GET(request: NextRequest) {
           { status: 400, headers: CORS_HEADERS }
         );
       }
-      targetUrl = `${baseUrl}/api/v2/comment/${encodeURIComponent(episodeId)}?withRelated=true`;
+      targetUrl = `${cleanBaseUrl}/api/v2/comment/${encodeURIComponent(episodeId)}?withRelated=true&duration=true`;
+    } else if (action === 'url') {
+      const videoUrl = searchParams.get('url');
+      if (!videoUrl) {
+        return NextResponse.json(
+          { error: 'Missing url parameter' },
+          { status: 400, headers: CORS_HEADERS }
+        );
+      }
+      targetUrl = `${cleanBaseUrl}/api/v2/comment?url=${encodeURIComponent(videoUrl)}&format=json&withRelated=true&duration=true`;
     } else {
       return NextResponse.json(
-        { error: 'Invalid action. Use "search" or "comments".' },
+        { error: 'Invalid action. Use "search", "comments", or "url".' },
         { status: 400, headers: CORS_HEADERS }
       );
     }

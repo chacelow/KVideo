@@ -11,6 +11,7 @@ import { DesktopControlsWrapper } from './desktop/DesktopControlsWrapper';
 import type { SourceItem } from './desktop/SourceResolutionMenu';
 import { DesktopOverlayWrapper } from './desktop/DesktopOverlayWrapper';
 import { DanmakuCanvas } from './DanmakuCanvas';
+import { DanmakuControlHub } from './desktop/DanmakuControlHub';
 import { usePlayerSettings } from './hooks/usePlayerSettings';
 import { useDanmaku } from './hooks/useDanmaku';
 import { useIsIOS, useIsMobile } from '@/lib/hooks/mobile/useDeviceDetection';
@@ -77,8 +78,10 @@ interface DesktopVideoPlayerProps {
   currentSource?: string;
   onSelectSource?: (source: SourceItem) => void;
   onEpisodeClick?: (index: number) => void;
+  onToggleDanmakuSidebar?: () => void;
+  isDanmakuSidebarOpen?: boolean;
+  danmaku?: import('./hooks/useDanmaku').UseDanmakuReturn;
 }
-
 export function DesktopVideoPlayer({
   src,
   poster,
@@ -98,10 +101,12 @@ export function DesktopVideoPlayer({
   currentSource,
   onSelectSource,
   onEpisodeClick,
+  onToggleDanmakuSidebar,
+  isDanmakuSidebarOpen,
+  danmaku: externalDanmaku,
 }: DesktopVideoPlayerProps) {
   const { refs, data, actions } = useDesktopPlayerState();
   const { fullscreenType: settingsFullscreenType } = usePlayerSettings(isPremium);
-  const isIOS = useIsIOS();
   const isMobile = useIsMobile();
   const [viewportMetrics, setViewportMetrics] = React.useState<ViewportMetrics>(() => readViewportMetrics());
   const [seekStepSeconds, setSeekStepSeconds] = React.useState(DEFAULT_SEEK_STEP_SECONDS);
@@ -122,13 +127,15 @@ export function DesktopVideoPlayer({
     }
   }, [videoResolution, onResolutionDetected]);
 
-  // Danmaku
-  const { danmakuEnabled, comments: danmakuComments } = useDanmaku({
-    videoTitle,
-    episodeName,
+  // Danmaku 全网多源与时间轴 (优先使用外部注入的单例，避免两套管理器冲突)
+  const internalDanmaku = useDanmaku({
+    videoTitle: externalDanmaku ? '' : videoTitle,
+    episodeName: externalDanmaku ? '' : episodeName,
     episodeIndex: currentEpisodeIndex,
   });
-
+  const danmaku = externalDanmaku || internalDanmaku;
+  const { danmakuEnabled, comments: danmakuComments, danmakuOffset } = danmaku;
+  const [internalSidebarOpen, setInternalSidebarOpen] = React.useState(false);
   const updateViewportMetrics = React.useCallback(() => {
     setViewportMetrics((current) => {
       const next = readViewportMetrics();
@@ -398,11 +405,11 @@ export function DesktopVideoPlayer({
             {...LEGACY_INLINE_VIDEO_PROPS} // Legacy iOS support
           />
 
-          {/* Danmaku Canvas */}
+          {/* Danmaku Canvas (应用时间轴偏移微调) */}
           {danmakuEnabled && danmakuComments.length > 0 && (
             <DanmakuCanvas
               comments={danmakuComments}
-              currentTime={currentTime}
+              currentTime={currentTime + danmakuOffset}
               isPlaying={isPlaying}
               duration={duration}
             />
@@ -464,11 +471,36 @@ export function DesktopVideoPlayer({
               videoResolution={videoResolution}
               totalEpisodes={totalEpisodes}
               currentEpisode={currentEpisodeIndex}
-              currentSource={currentSource}
               sources={sources}
               onSelectSource={onSelectSource}
               onEpisodeClick={onEpisodeClick}
+              danmaku={danmaku}
+              onToggleDanmakuSidebar={() => {
+                if (data.isFullscreen) {
+                  setInternalSidebarOpen((prev) => !prev);
+                } else {
+                  onToggleDanmakuSidebar?.();
+                }
+              }}
+              isDanmakuSidebarOpen={data.isFullscreen ? internalSidebarOpen : Boolean(isDanmakuSidebarOpen)}
             />
+
+            {/* 仅在全屏模式下：播放器内部右侧滑入抽屉 (普通模式已由外部并排展示) */}
+            {data.isFullscreen && internalSidebarOpen && (
+              <div className="absolute inset-0 z-50 flex justify-end pointer-events-auto overflow-hidden animate-in fade-in-0 duration-200">
+                <div
+                  className="flex-1 bg-black/40 backdrop-blur-[2px] transition-opacity cursor-pointer"
+                  onClick={() => setIsDanmakuSidebarOpen(false)}
+                />
+                {/* 右侧侧边栏面板 (宽 400px ~ 420px) */}
+                <div className="w-[420px] max-w-[85vw] h-full shadow-2xl animate-in slide-in-from-right-full duration-250 border-l border-white/10 bg-[#141517]/98 z-10">
+                  <DanmakuControlHub
+                    danmaku={danmaku}
+                    onClose={() => setInternalSidebarOpen(false)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

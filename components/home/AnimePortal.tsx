@@ -48,6 +48,7 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
     return d === 0 ? 7 : d;
   }, []);
   const [selectedDay, setSelectedDay] = useState<number>(currentWeekday);
+  const [calendarArea, setCalendarArea] = useState<'all' | 'japan' | 'china'>('all');
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -111,11 +112,13 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
       .finally(() => setIsLoading(false));
   }, []);
 
-  // 当前选中周几的连载番剧
+  // 当前选中周几的连载番剧 (支持全部/日漫/国漫筛选)
   const currentDayAnimes = useMemo(() => {
     const group = weekdayList.find((g) => g.weekday.id === selectedDay);
-    return group ? group.items : [];
-  }, [weekdayList, selectedDay]);
+    if (!group) return [];
+    if (calendarArea === 'all') return group.items;
+    return group.items.filter((item) => item.area === calendarArea);
+  }, [weekdayList, selectedDay, calendarArea]);
 
   // 首页三大排行榜数据切换
   const activeRankingList = useMemo(() => {
@@ -245,6 +248,25 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
                       </button>
                     );
                   })}
+                </div>
+
+                {/* 周更分类：全部 | 日漫 | 国漫 */}
+                <div className="hidden sm:flex items-center gap-1 text-[11px] text-[#9499a0] ml-2 bg-white/5 p-0.5 rounded-md">
+                  {[
+                    { id: 'all', label: '全部' },
+                    { id: 'japan', label: '日漫' },
+                    { id: 'china', label: '国漫' },
+                  ].map((a) => (
+                    <button
+                      key={a.id}
+                      onClick={() => setCalendarArea(a.id as any)}
+                      className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                        calendarArea === a.id ? 'text-pink-400 font-bold bg-white/10' : 'hover:text-white'
+                      }`}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -560,16 +582,9 @@ function CompactAnimeCard({
           </div>
         )}
 
-        {anime.rate && anime.rate !== '暂无' && (
-          <div className="absolute top-1 left-1 z-10">
-            <span className="text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm text-white bg-emerald-600/95 backdrop-blur-md">
-              {anime.rate}
-            </span>
-          </div>
-        )}
-
-        {rankNum !== undefined && (
-          <div className="absolute top-1 left-1 z-10">
+        {/* 左上角徽标区：排名数字与评分横向并排，绝不重叠 */}
+        <div className="absolute top-1 left-1 z-10 flex items-center gap-1">
+          {rankNum !== undefined && (
             <span
               className={`w-4.5 h-4.5 flex items-center justify-center rounded text-[10px] font-black shadow-md ${
                 rankNum === 1
@@ -578,13 +593,18 @@ function CompactAnimeCard({
                   ? 'bg-amber-500 text-white'
                   : rankNum === 3
                   ? 'bg-yellow-500 text-black'
-                  : 'bg-black/60 text-white/80 border border-white/20 backdrop-blur-md'
+                  : 'bg-black/60 text-white/90 border border-white/20 backdrop-blur-md'
               }`}
             >
               {rankNum}
             </span>
-          </div>
-        )}
+          )}
+          {anime.rate && anime.rate !== '暂无' && (
+            <span className="text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm text-white bg-emerald-600/95 backdrop-blur-md">
+              {anime.rate}
+            </span>
+          )}
+        </div>
 
         <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent pt-4 pb-1 px-1.5 flex justify-between items-end text-[9px] text-white/90">
           <span className="truncate">{anime.views || '连载中'}</span>

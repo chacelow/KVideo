@@ -114,15 +114,7 @@ export const VideoGroupCard = memo<VideoGroupCardProps>(({
               {videos.length}线聚合
             </span>
           )}
-          {resText && (
-            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded shadow-sm text-white ${
-              resText === '4K' ? 'bg-amber-500/90' : 'bg-pink-500/90'
-            }`}>
-              {resText}
-            </span>
-          )}
         </div>
-
         {/* 底部半透明阴影条：展示更新集数与最佳延迟 */}
         <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent pt-6 pb-1.5 px-2 flex items-center justify-between text-[11px] text-white/90">
           <span className="truncate font-medium">{displayRemarks || '正片'}</span>

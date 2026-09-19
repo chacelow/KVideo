@@ -4,10 +4,12 @@ import React from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { Icons } from '@/components/ui/Icon';
 import { SourceResolutionMenu, type SourceItem } from './SourceResolutionMenu';
-import { Check } from 'lucide-react';
+import { Check, MessageSquare } from 'lucide-react';
 import { PlayerSettingsMenu } from './PlayerSettingsMenu';
+import { DanmakuControlHub } from './DanmakuControlHub';
 import type { VideoResolutionInfo } from '../hooks/useVideoResolution';
-
+import type { UseDanmakuReturn } from '../hooks/useDanmaku';
+import { getPlatformLabel } from '@/lib/utils/danmaku-utils';
 interface DesktopRightControlsProps {
   isNativeFullscreen: boolean;
   isWebFullscreen: boolean;
@@ -35,6 +37,11 @@ interface DesktopRightControlsProps {
   isPremium?: boolean;
   isProxied?: boolean;
   onCopyLink?: (type?: 'original' | 'proxy') => void;
+  // 弹幕系统控制
+  danmaku?: UseDanmakuReturn;
+  duration?: number;
+  onToggleDanmakuSidebar?: () => void;
+  isDanmakuSidebarOpen?: boolean;
 }
 
 export function DesktopRightControls({
@@ -61,9 +68,32 @@ export function DesktopRightControls({
   isPremium = false,
   isProxied = false,
   onCopyLink,
+  danmaku,
+  duration = 0,
+  onToggleDanmakuSidebar,
+  isDanmakuSidebarOpen = false,
 }: DesktopRightControlsProps) {
   return (
     <div className="player-controls-right relative z-50 flex shrink-0 items-center gap-2 sm:gap-3 text-xs select-none">
+      {/* 0. 弹幕系统侧边栏控制入口 */}
+      {/* 0. 弹幕系统控制入口 */}
+      {danmaku && (
+        <button
+          type="button"
+          onClick={onToggleDanmakuSidebar}
+          className={`btn-icon shrink-0 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap transition-all cursor-pointer outline-none flex items-center gap-1 ${
+            isDanmakuSidebarOpen
+              ? 'text-pink-400 font-bold'
+              : danmaku.danmakuEnabled
+              ? 'text-pink-400/90 hover:text-pink-300'
+              : 'text-white/60 hover:text-white'
+          }`}
+          title="弹幕设置与列表"
+        >
+          <MessageSquare size={14} className={isDanmakuSidebarOpen || danmaku.danmakuEnabled ? 'text-pink-400' : 'text-white/60'} />
+          <span className="whitespace-nowrap">弹幕</span>
+        </button>
+      )}
       {/* 1. 独立组件：清晰度与源切换 (选清晰度 -> 自动应用最佳源 -> 支持手动切换) */}
       <SourceResolutionMenu
         currentSource={currentSource}
@@ -79,10 +109,10 @@ export function DesktopRightControls({
           <Popover.Trigger asChild>
             <button
               type="button"
-              className="btn-icon shrink-0 px-1 text-xs font-semibold text-white/90 hover:text-pink-400 transition-colors cursor-pointer outline-none"
+              className="btn-icon shrink-0 px-1.5 py-0.5 text-xs font-semibold text-white/90 hover:text-pink-400 transition-colors cursor-pointer outline-none whitespace-nowrap"
               title="选集"
             >
-              <span>选集</span>
+              <span className="whitespace-nowrap">选集</span>
             </button>
           </Popover.Trigger>
 

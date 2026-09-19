@@ -4,7 +4,7 @@ import { useDesktopPlayerState } from '../hooks/useDesktopPlayerState';
 import { useDesktopPlayerLogic } from '../hooks/useDesktopPlayerLogic';
 import type { VideoResolutionInfo } from '../hooks/useVideoResolution';
 import type { SourceItem } from './SourceResolutionMenu';
-
+import type { UseDanmakuReturn } from '../hooks/useDanmaku';
 interface DesktopControlsWrapperProps {
     src: string;
     data: ReturnType<typeof useDesktopPlayerState>['data'];
@@ -17,6 +17,9 @@ interface DesktopControlsWrapperProps {
     sources?: SourceItem[];
     onSelectSource?: (source: SourceItem) => void;
     onEpisodeClick?: (index: number) => void;
+    danmaku?: UseDanmakuReturn;
+    onToggleDanmakuSidebar?: () => void;
+    isDanmakuSidebarOpen?: boolean;
 }
 
 export function DesktopControlsWrapper({
@@ -30,9 +33,11 @@ export function DesktopControlsWrapper({
     currentSource,
     sources,
     onSelectSource,
-    onEpisodeClick
+    onEpisodeClick,
+    danmaku,
+    onToggleDanmakuSidebar,
+    isDanmakuSidebarOpen,
 }: DesktopControlsWrapperProps) {
-
     const {
         isPlaying,
         currentTime,
@@ -111,11 +116,14 @@ export function DesktopControlsWrapper({
             onEpisodeClick={onEpisodeClick}
             playbackRate={data.playbackRate}
             onSpeedChange={logic.changePlaybackSpeed}
+            formatTime={formatTime}
             onProgressClick={handleProgressClick}
             onProgressMouseDown={handleProgressMouseDown}
-            onProgressTouchStart={handleProgressTouchStart}
-            onCopyLink={logic.handleCopyLink}
-            formatTime={formatTime}
+            onSelectSource={onSelectSource}
+            onEpisodeClick={onEpisodeClick}
+            danmaku={danmaku}
+            onToggleDanmakuSidebar={onToggleDanmakuSidebar}
+            isDanmakuSidebarOpen={isDanmakuSidebarOpen}
         />
     );
 }

@@ -58,15 +58,6 @@ export const VideoCard = memo<VideoCardProps>(({
         />
 
         {/* 右上角来源/清晰度角标 (如 B站大会员风格角标) */}
-        {resText && (
-          <div className="absolute top-1.5 right-1.5 z-10">
-            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded shadow-sm text-white ${
-              resText === '4K' ? 'bg-amber-500/90' : 'bg-pink-500/90'
-            }`}>
-              {resText}
-            </span>
-          </div>
-        )}
 
         {/* 底部渐变半透明文字条 (显示 话数/备注 + Ping速度) */}
         <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1.5 px-2 flex items-center justify-between text-[11px] text-white/90">

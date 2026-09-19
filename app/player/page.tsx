@@ -4,8 +4,10 @@ import { Suspense, useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { VideoPlayer } from '@/components/player/VideoPlayer';
 import { VideoMetadata } from '@/components/player/VideoMetadata';
-import type { VideoResolutionInfo } from '@/components/player/hooks/useVideoResolution';
+import { DanmakuSidebar } from '@/components/player/desktop/DanmakuSidebar';
+import { useDanmaku } from '@/components/player/hooks/useDanmaku';
 import { useVideoPlayer } from '@/lib/hooks/useVideoPlayer';
+import type { VideoResolutionInfo } from '@/components/player/hooks/useVideoResolution';
 import { useHistory } from '@/lib/store/history-store';
 import { FavoritesSidebar } from '@/components/favorites/FavoritesSidebar';
 import { FavoriteButton } from '@/components/favorites/FavoriteButton';
@@ -51,9 +53,34 @@ function PlayerContent() {
 
   const playerTimeRef = useRef(0);
 
-  // 播放器状态机
+  const [isDanmakuSidebarOpen, setIsDanmakuSidebarOpen] = useState(true);
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const [playerHeight, setPlayerHeight] = useState<number>(0);
+
+  // 动态锁定侧边栏高度与左侧播放器严格等高，绝不被弹幕列表撑高页面
+  useEffect(() => {
+    const el = playerContainerRef.current;
+    if (!el) return;
+    const updateHeight = () => {
+      const h = el.offsetHeight || el.clientHeight;
+      if (h > 150) setPlayerHeight(h);
+    };
+    updateHeight();
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const h = entry.contentRect.height;
+        if (h > 150) setPlayerHeight(h);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const {
     videoData,
+    loading,
+    videoError,
     currentEpisode,
     playUrl,
     setCurrentEpisode,
@@ -179,44 +206,76 @@ function PlayerContent() {
     });
   }
 
+  // 全网弹幕聚合与时间轴管理
+  const danmaku = useDanmaku({
+    videoTitle: videoData?.vod_name || title || '',
+    episodeName: videoData?.episodes?.[currentEpisode]?.name || '',
+    episodeIndex: currentEpisode,
+  });
   return (
     <div className="min-h-screen bg-[#121212] text-[#e3e5e7]">
       {/* 52px 极简通用 Header */}
       <Navbar isPremiumMode={isPremium} onReset={() => router.push(isPremium ? '/premium' : '/')} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24 pt-6 space-y-6">
+      <main className="max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 pb-24 pt-6 space-y-6">
 
-        {/* 1. 播放器主体：B站同款1280px宽屏自适应，完全充满无多余黑框 */}
-        <div className="w-full rounded-xl overflow-hidden shadow-2xl relative">
-          <VideoPlayer
-            playUrl={playUrl}
-            videoId={videoId || undefined}
-            currentEpisode={currentEpisode}
-            onBack={() => router.back()}
-            totalEpisodes={videoData?.episodes?.length || 0}
-            onNextEpisode={() => {
-              if (videoData?.episodes && currentEpisode < videoData.episodes.length - 1) {
-                handleEpisodeClick(videoData.episodes[currentEpisode + 1], currentEpisode + 1);
-              }
+        {/* 1. 播放器主体与右侧并排弹幕列表侧边栏 (B站同款 Web 左右并排布局) */}
+        <div className="flex flex-col lg:flex-row gap-4 items-start w-full">
+          {/* 左侧：播放器主体 (独立自适应，保持标准物理高度) */}
+          <div ref={playerContainerRef} className="flex-1 min-w-0 w-full rounded-xl overflow-hidden shadow-2xl relative bg-black">
+            <VideoPlayer
+              playUrl={playUrl}
+              videoId={videoId || undefined}
+              currentEpisode={currentEpisode}
+              onBack={() => router.back()}
+              totalEpisodes={videoData?.episodes?.length || 0}
+              onNextEpisode={() => {
+                if (videoData?.episodes && currentEpisode < videoData.episodes.length - 1) {
+                  handleEpisodeClick(videoData.episodes[currentEpisode + 1], currentEpisode + 1);
+                }
+              }}
+              isReversed={isReversed}
+              isPremium={isPremium}
+              videoTitle={videoData?.vod_name || title}
+              episodeName={videoData?.episodes?.[currentEpisode]?.name || ''}
+              externalTimeRef={playerTimeRef}
+              onResolutionDetected={handleResolutionDetected}
+              sources={playerSources}
+              currentSource={source}
+              onSelectSource={handleSourceSelect}
+              onEpisodeClick={(idx) => {
+                if (videoData?.episodes?.[idx]) {
+                  handleEpisodeClick(videoData.episodes[idx], idx);
+                }
+              }}
+              onTimeUpdate={(currentTime, duration) => {
+                setPlaybackTime(currentTime);
+                setPlaybackDuration(duration);
+              }}
+              danmaku={danmaku}
+              isDanmakuSidebarOpen={isDanmakuSidebarOpen}
+              onToggleDanmakuSidebar={() => setIsDanmakuSidebarOpen((prev) => !prev)}
+            />
+          </div>
+
+          {/* 右侧：位于播放器右侧的并排弹幕列表与控制侧边栏 (高度严格对齐左侧播放器，绝不撑爆) */}
+          <DanmakuSidebar
+            danmaku={danmaku}
+            currentVideoDuration={playbackDuration}
+            currentTime={playbackTime}
+            onSeek={(t) => {
+              const video = document.querySelector('video');
+              if (video) video.currentTime = t;
             }}
-            isReversed={isReversed}
-            isPremium={isPremium}
-            videoTitle={videoData?.vod_name || title}
-            episodeName={videoData?.episodes?.[currentEpisode]?.name || ''}
-            externalTimeRef={playerTimeRef}
-            onResolutionDetected={handleResolutionDetected}
-            // 关键：把全网多源与选集直接注入播放器内部底栏！
-            sources={playerSources}
-            currentSource={source}
-            onSelectSource={handleSourceSelect}
-            onEpisodeClick={(idx) => {
-              if (videoData?.episodes?.[idx]) {
-                handleEpisodeClick(videoData.episodes[idx], idx);
-              }
+            isOpen={true}
+            onToggleOpen={() => {}}
+            style={{
+              height: playerHeight > 0 ? `${playerHeight}px` : undefined,
+              maxHeight: playerHeight > 0 ? `${playerHeight}px` : undefined,
             }}
+            className="w-full lg:w-80 xl:w-88 rounded-xl"
           />
         </div>
-
         {/* 2. 播放器正下方：自然流式展开的作品详情与收藏 (完全不遮挡，自适应呈现) */}
         <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-4">
           <div className="flex items-center justify-between">

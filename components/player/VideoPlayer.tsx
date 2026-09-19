@@ -30,6 +30,10 @@ interface VideoPlayerProps {
   currentSource?: string;
   onSelectSource?: (source: SourceItem) => void;
   onEpisodeClick?: (index: number) => void;
+  onTimeUpdate?: (currentTime: number, duration: number) => void;
+  danmaku?: import('./hooks/useDanmaku').UseDanmakuReturn;
+  isDanmakuSidebarOpen?: boolean;
+  onToggleDanmakuSidebar?: () => void;
 }
 export function VideoPlayer({
   playUrl,
@@ -48,6 +52,10 @@ export function VideoPlayer({
   currentSource,
   onSelectSource,
   onEpisodeClick,
+  onTimeUpdate,
+  danmaku,
+  isDanmakuSidebarOpen,
+  onToggleDanmakuSidebar,
 }: VideoPlayerProps) {
   const [videoError, setVideoError] = useState<string>('');
   const [useProxy, setUseProxy] = useState(false);
@@ -125,7 +133,8 @@ export function VideoPlayer({
       lastSaveTimeRef.current = now;
       saveProgress(currentTime, duration);
     }
-  }, [videoId, playUrl, saveProgress]);
+    onTimeUpdate?.(currentTime, duration);
+  }, [videoId, playUrl, saveProgress, onTimeUpdate]);
 
   // Save on page leave/refresh
   useEffect(() => {
@@ -228,6 +237,9 @@ export function VideoPlayer({
           currentSource={currentSource}
           onSelectSource={onSelectSource}
           onEpisodeClick={onEpisodeClick}
+          danmaku={danmaku}
+          isDanmakuSidebarOpen={isDanmakuSidebarOpen}
+          onToggleDanmakuSidebar={onToggleDanmakuSidebar}
         />
       )}
     </div>

@@ -40,8 +40,7 @@ export function PlayerSettingsMenu({
     setDanmakuDisplayArea,
   } = usePlayerSettings(isPremium);
 
-  const [activeTab, setActiveTab] = useState<'playback' | 'danmaku' | 'tools'>('playback');
-  const [copySuccess, setCopySuccess] = useState(false);
+  const [activeTab, setActiveTab] = useState<'playback' | 'tools'>('playback');
 
   const handleCopy = (type?: 'original' | 'proxy') => {
     onCopyLink?.(type);
@@ -73,7 +72,6 @@ export function PlayerSettingsMenu({
           <div className="flex gap-1 bg-white/5 p-0.5 rounded-lg text-[11px] font-semibold">
             {[
               { id: 'playback', label: '播放控制' },
-              { id: 'danmaku', label: '弹幕偏好' },
               { id: 'tools', label: '快捷工具' },
             ].map((t) => (
               <button
@@ -215,71 +213,6 @@ export function PlayerSettingsMenu({
                   })}
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* 2. 弹幕偏好面板 */}
-          {activeTab === 'danmaku' && (
-            <div className="space-y-3.5 animate-fade-in">
-              {/* 弹幕总开关 */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <MessageSquare size={14} className="text-pink-400" />
-                  <div>
-                    <span className="font-medium block">全网弹幕聚合</span>
-                    <span className="text-[10px] text-white/40">爱优腾芒B站弹幕实时匹配</span>
-                  </div>
-                </div>
-                <ToggleSwitch checked={danmakuEnabled} onChange={setDanmakuEnabled} />
-              </div>
-
-              {danmakuEnabled && (
-                <>
-                  {/* 弹幕透明度调节 */}
-                  <div className="space-y-1 pt-1 border-t border-white/5">
-                    <div className="flex items-center justify-between text-[11px] text-white/70">
-                      <span>不透明度:</span>
-                      <span className="font-bold text-pink-400">{Math.round(danmakuOpacity * 100)}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="10"
-                      max="100"
-                      value={Math.round(danmakuOpacity * 100)}
-                      onChange={(e) => setDanmakuOpacity(parseInt(e.target.value) / 100)}
-                      className="w-full h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-pink-500"
-                    />
-                  </div>
-
-                  {/* 弹幕显示区域 */}
-                  <div className="space-y-1.5 pt-1 border-t border-white/5">
-                    <span className="text-[11px] text-white/70 block">显示区域:</span>
-                    <div className="flex gap-1 bg-white/5 p-0.5 rounded-lg text-[10px]">
-                      {[
-                        { val: 0.25, label: '顶部1/4' },
-                        { val: 0.5, label: '半屏' },
-                        { val: 0.75, label: '大半屏' },
-                        { val: 1.0, label: '全屏' },
-                      ].map((item) => {
-                        const isCur = danmakuDisplayArea === item.val;
-                        return (
-                          <button
-                            key={item.val}
-                            onClick={() => setDanmakuDisplayArea(item.val)}
-                            className={`flex-1 py-1 rounded transition-all cursor-pointer ${
-                              isCur
-                                ? 'bg-pink-500 text-white font-bold'
-                                : 'text-white/60 hover:text-white'
-                            }`}
-                          >
-                            {item.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
           )}
 
