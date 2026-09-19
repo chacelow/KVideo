@@ -4,12 +4,14 @@ import { Suspense, useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { VideoPlayer } from '@/components/player/VideoPlayer';
 import { VideoMetadata } from '@/components/player/VideoMetadata';
+import { RelatedRecommendations } from '@/components/player/RelatedRecommendations';
 import { DanmakuSidebar } from '@/components/player/desktop/DanmakuSidebar';
 import { useDanmaku } from '@/components/player/hooks/useDanmaku';
 import { useVideoPlayer } from '@/lib/hooks/useVideoPlayer';
 import type { VideoResolutionInfo } from '@/components/player/hooks/useVideoResolution';
 import { useHistory } from '@/lib/store/history-store';
 import { FavoritesSidebar } from '@/components/favorites/FavoritesSidebar';
+import { WatchHistorySidebar } from '@/components/history/WatchHistorySidebar';
 import { FavoriteButton } from '@/components/favorites/FavoriteButton';
 import { Navbar } from '@/components/layout/Navbar';
 import { settingsStore } from '@/lib/store/settings-store';
@@ -75,7 +77,17 @@ function PlayerContent() {
       }
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    const handleFsChange = () => {
+      updateHeight();
+      requestAnimationFrame(updateHeight);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    document.addEventListener('webkitfullscreenchange', handleFsChange);
+    return () => {
+      ro.disconnect();
+      document.removeEventListener('fullscreenchange', handleFsChange);
+      document.removeEventListener('webkitfullscreenchange', handleFsChange);
+    };
   }, []);
   const {
     videoData,
@@ -85,6 +97,10 @@ function PlayerContent() {
     playUrl,
     setCurrentEpisode,
     setPlayUrl,
+    activeVideoId,
+    activeSource,
+    resumePosition,
+    switchSource,
   } = useVideoPlayer(videoId, source, episodeParam, isReversed);
 
   // 进页面立即以 title 检索全网所有源，直接喂给播放器内部控件
@@ -169,15 +185,7 @@ function PlayerContent() {
 
   // 切源处理
   const handleSourceSelect = (target: SourceItem) => {
-    const params = new URLSearchParams(window.location.search);
-    params.set('id', String(target.id));
-    params.set('source', target.source);
-    params.set('title', title);
-    params.set('episode', currentEpisode.toString());
-    if (playerTimeRef.current > 1) {
-      params.set('t', Math.floor(playerTimeRef.current).toString());
-    }
-    router.replace(`/player?${params.toString()}`, { scroll: false });
+    void switchSource(String(target.id), target.source, playerTimeRef.current);
   };
 
   // 硬件真实物理分辨率回调
@@ -185,7 +193,6 @@ function PlayerContent() {
     setHardwareResolution(info);
   }, []);
 
-  if (missingRequiredParams) return null;
 
   // 格式化传入播放器内部的全部源列表
   const playerSources: SourceItem[] = allSearchedSources.map((s) => ({
@@ -197,11 +204,11 @@ function PlayerContent() {
   }));
 
   // 如果当前源还没在列表里，补充进去
-  if (source && !playerSources.some((s) => s.source === source)) {
+  if (activeSource && activeVideoId && !playerSources.some((s) => s.source === activeSource)) {
     playerSources.unshift({
-      id: videoId,
-      source: source,
-      sourceName: getSourceName(source),
+      id: activeVideoId,
+      source: activeSource,
+      sourceName: getSourceName(activeSource),
       remarks: (videoData as Record<string, unknown> | null)?.vod_remarks as string | undefined,
     });
   }
@@ -212,6 +219,7 @@ function PlayerContent() {
     episodeName: videoData?.episodes?.[currentEpisode]?.name || '',
     episodeIndex: currentEpisode,
   });
+  if (missingRequiredParams) return null;
   return (
     <div className="min-h-screen bg-[#121212] text-[#e3e5e7]">
       {/* 52px 极简通用 Header */}
@@ -222,10 +230,11 @@ function PlayerContent() {
         {/* 1. 播放器主体与右侧并排弹幕列表侧边栏 (B站同款 Web 左右并排布局) */}
         <div className="flex flex-col lg:flex-row gap-4 items-start w-full">
           {/* 左侧：播放器主体 (独立自适应，保持标准物理高度) */}
-          <div ref={playerContainerRef} className="flex-1 min-w-0 w-full rounded-xl overflow-hidden shadow-2xl relative bg-black">
+          <div ref={playerContainerRef} className="flex-1 min-w-0 w-full overflow-hidden relative bg-black">
             <VideoPlayer
               playUrl={playUrl}
-              videoId={videoId || undefined}
+              videoId={activeVideoId || undefined}
+              initialTime={resumePosition}
               currentEpisode={currentEpisode}
               onBack={() => router.back()}
               totalEpisodes={videoData?.episodes?.length || 0}
@@ -241,7 +250,7 @@ function PlayerContent() {
               externalTimeRef={playerTimeRef}
               onResolutionDetected={handleResolutionDetected}
               sources={playerSources}
-              currentSource={source}
+              currentSource={activeSource || undefined}
               onSelectSource={handleSourceSelect}
               onEpisodeClick={(idx) => {
                 if (videoData?.episodes?.[idx]) {
@@ -249,7 +258,6 @@ function PlayerContent() {
                 }
               }}
               onTimeUpdate={(currentTime, duration) => {
-                setPlaybackTime(currentTime);
                 setPlaybackDuration(duration);
               }}
               danmaku={danmaku}
@@ -262,22 +270,20 @@ function PlayerContent() {
           <DanmakuSidebar
             danmaku={danmaku}
             currentVideoDuration={playbackDuration}
-            currentTime={playbackTime}
             onSeek={(t) => {
               const video = document.querySelector('video');
               if (video) video.currentTime = t;
             }}
             isOpen={true}
-            onToggleOpen={() => {}}
             style={{
-              height: playerHeight > 0 ? `${playerHeight}px` : undefined,
-              maxHeight: playerHeight > 0 ? `${playerHeight}px` : undefined,
+              height: playerHeight > 0 ? `${playerHeight}px` : '60vh',
+              maxHeight: 'calc(100dvh - 100px)',
             }}
-            className="w-full lg:w-80 xl:w-88 rounded-xl"
+            className="w-full shrink-0 lg:w-80 xl:w-88"
           />
         </div>
         {/* 2. 播放器正下方：自然流式展开的作品详情与收藏 (完全不遮挡，自适应呈现) */}
-        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-4">
+        <div className="w-full space-y-3 pb-2 border-b border-white/5">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-base text-white">作品详情与介绍</h3>
             {videoData && videoId && (
@@ -300,6 +306,14 @@ function PlayerContent() {
             title={title}
           />
         </div>
+
+        {/* 3. 播放器最下方：相关精彩剧目推荐 (基于同类型与同题材推荐) */}
+        <RelatedRecommendations
+          currentTitle={videoData?.vod_name || title}
+          typeName={videoData?.type_name || '动漫'}
+          vodClass={(videoData as Record<string, unknown> | null)?.vod_class as string || ''}
+          isPremium={isPremium}
+        />
       </main>
 
       <FavoritesSidebar isPremium={isPremium} />

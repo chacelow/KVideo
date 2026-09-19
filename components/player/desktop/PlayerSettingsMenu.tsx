@@ -41,6 +41,7 @@ export function PlayerSettingsMenu({
   } = usePlayerSettings(isPremium);
 
   const [activeTab, setActiveTab] = useState<'playback' | 'tools'>('playback');
+  const [copySuccess, setCopySuccess] = useState(false);
 
   const handleCopy = (type?: 'original' | 'proxy') => {
     onCopyLink?.(type);

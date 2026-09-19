@@ -2,6 +2,7 @@
 
 export interface SourcePreferenceItem {
   animeId: string | number;
+  platform?: string;
   enabled: boolean;
   offset: number;
 }
@@ -16,9 +17,8 @@ export interface DanmakuSeriesPreference {
 }
 
 export interface DanmakuGlobalConfig {
-  // 弹幕飞行速度 (秒，越小越快，默认 8 秒)
-  speed: number; // 4 (极速), 6 (快速), 8 (标准), 10 (平缓), 12 (慢速)
-  // 外观
+  // 弹幕飞行速度 (耗时秒数，越大越慢越舒缓，B站原生标准约为 12~14 秒)
+  speed: number; // 7 (极速), 10 (快速), 13 (B站标准默认), 16 (慢速), 19 (极慢)
   opacity: number; // 0.1 ~ 1.0 (默认 0.8)
   fontSize: number; // 14, 18, 20, 24, 28 (默认 20)
   displayArea: number; // 0.25 (1/4屏), 0.5 (半屏), 0.75 (3/4屏), 1.0 (全屏)
@@ -38,7 +38,7 @@ export interface DanmakuGlobalConfig {
   cleanLikeBadges: boolean; // 过滤隐藏 ♡/Like/Unlike 点赞互动杂质 (默认 true)
 }
 const DEFAULT_GLOBAL_CONFIG: DanmakuGlobalConfig = {
-  speed: 8,
+  speed: 13,
   opacity: 0.8,
   fontSize: 20,
   displayArea: 0.5,
@@ -57,12 +57,15 @@ const DEFAULT_GLOBAL_CONFIG: DanmakuGlobalConfig = {
 const SERIES_PREF_PREFIX = 'kvideo_danmaku_pref_';
 const GLOBAL_CONFIG_KEY = 'kvideo_danmaku_global_config_v1';
 
-function getCleanTitleKey(title: string): string {
-  return (title || '')
-    .trim()
-    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '')
-    .toLowerCase();
+function getSeriesKey(title: string): string {
+  const normalized = title.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+  return normalized ? encodeURIComponent(normalized) : 'default';
 }
+
+function getLegacyFullTitleKey(title: string): string {
+  return title.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase() || 'default';
+}
+
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -75,9 +78,14 @@ export const danmakuPreferenceStore = {
   // 1. 剧集级别记忆 (多源配置、独立偏移、全局偏移)
   getPreference(title: string): DanmakuSeriesPreference {
     if (typeof window === 'undefined') return { globalOffset: 0, followOffset: true };
-    const key = `${SERIES_PREF_PREFIX}${getCleanTitleKey(title)}`;
+    const key = `${SERIES_PREF_PREFIX}${getSeriesKey(title)}`;
     try {
-      const val = localStorage.getItem(key);
+      let val = localStorage.getItem(key);
+      if (!val) {
+        const legacyKey = `${SERIES_PREF_PREFIX}${getLegacyFullTitleKey(title)}`;
+        val = localStorage.getItem(legacyKey);
+        if (val && legacyKey !== key) localStorage.setItem(key, val);
+      }
       if (val) {
         const parsed = JSON.parse(val);
         return {
@@ -91,10 +99,9 @@ export const danmakuPreferenceStore = {
     } catch {}
     return { globalOffset: 0, followOffset: true };
   },
-
   savePreference(title: string, pref: Partial<DanmakuSeriesPreference>) {
     if (typeof window === 'undefined' || !title) return;
-    const key = `${SERIES_PREF_PREFIX}${getCleanTitleKey(title)}`;
+    const key = `${SERIES_PREF_PREFIX}${getSeriesKey(title)}`;
     try {
       const current = this.getPreference(title);
       const updated: DanmakuSeriesPreference = {
@@ -114,11 +121,15 @@ export const danmakuPreferenceStore = {
       const val = localStorage.getItem(GLOBAL_CONFIG_KEY);
       if (val) {
         const parsed = JSON.parse(val);
-        cachedGlobalConfig = {
+        // 如果以前存储的是老版本的 8s 极快速度，自动平滑升级为 13s 舒缓速度
+        const effectiveSpeed = typeof parsed.speed === 'number' && parsed.speed <= 8 ? 13 : (parsed.speed || 13);
+        const loadedConfig: DanmakuGlobalConfig = {
           ...DEFAULT_GLOBAL_CONFIG,
           ...parsed,
+          speed: effectiveSpeed,
         };
-        return cachedGlobalConfig;
+        cachedGlobalConfig = loadedConfig;
+        return loadedConfig;
       }
     } catch {}
     cachedGlobalConfig = DEFAULT_GLOBAL_CONFIG;

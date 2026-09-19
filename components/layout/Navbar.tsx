@@ -9,8 +9,7 @@ import { useSiteIcon } from '@/components/SiteIconProvider';
 import { siteConfig } from '@/lib/config/site-config';
 import { getSession, clearSession, hasPermission, type AuthSession } from '@/lib/store/auth-store';
 import { useRuntimeFeatures } from '@/components/RuntimeFeaturesProvider';
-import { LogOut, Heart, Settings, Tv, Search, X, Loader2 } from 'lucide-react';
-
+import { LogOut, Heart, Settings, Tv, Search, X, Loader2, History } from 'lucide-react';
 export type ContentCategory = 'anime' | 'tv' | 'movie';
 
 interface NavbarProps {
@@ -144,6 +143,29 @@ export function Navbar({
               </Link>
             )}
           </nav>
+
+          {/* 左侧统一专属区域：Like (追番) 与 History (历史) */}
+          <div className="flex items-center gap-1 sm:gap-2 pl-3 sm:pl-4 border-l border-white/10 text-xs">
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('kvideo-toggle-favorites'))}
+              className="flex items-center gap-1 py-1 px-1.5 rounded hover:text-pink-400 hover:bg-white/5 text-[#9499a0] transition-colors cursor-pointer"
+              title="追番与收藏 (Like)"
+            >
+              <Heart size={14} className="text-pink-400" />
+              <span className="hidden sm:inline text-[11px]">追番</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('kvideo-toggle-history'))}
+              className="flex items-center gap-1 py-1 px-1.5 rounded hover:text-[#00aeec] hover:bg-white/5 text-[#9499a0] transition-colors cursor-pointer"
+              title="观看历史 (History)"
+            >
+              <History size={14} className="text-[#00aeec]" />
+              <span className="hidden sm:inline text-[11px]">历史</span>
+            </button>
+          </div>
         </div>
 
         {/* 2. 中间：B站同款紧凑搜索框 (高度32px，灰底扁平胶囊，直接内嵌在Header内) */}
@@ -188,15 +210,6 @@ export function Navbar({
 
         {/* 3. 右侧：B站同款极简图标区 (追番收藏、设置、主题、用户) */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0 text-[#9499a0]">
-          <Link
-            href={favoritesHref}
-            className="flex items-center gap-1 p-1.5 hover:text-pink-400 hover:bg-white/5 rounded transition-colors text-xs"
-            title="追番与收藏"
-          >
-            <Heart size={15} />
-            <span className="hidden lg:inline text-[11px]">追番</span>
-          </Link>
-
           <Link
             href={settingsHref}
             className="p-1.5 hover:text-[#e3e5e7] hover:bg-white/5 rounded transition-colors"

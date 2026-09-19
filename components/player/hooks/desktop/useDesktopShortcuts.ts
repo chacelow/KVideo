@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { createArrowKeyGesture } from '@/lib/player/arrow-key-gesture';
 
 interface UseDesktopShortcutsProps {
     videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -37,18 +38,26 @@ export function useDesktopShortcuts({
     setIsMuted,
     controlsTimeoutRef,
 }: UseDesktopShortcutsProps) {
+    const callbacks = useRef({ togglePlay, toggleMute, toggleFullscreen, toggleWindowFullscreen, togglePictureInPicture, skipForward, skipBackward, showVolumeBarTemporarily, setShowControls, setVolume, setIsMuted, isPlaying, volume, isPiPSupported });
+    callbacks.current = { togglePlay, toggleMute, toggleFullscreen, toggleWindowFullscreen, togglePictureInPicture, skipForward, skipBackward, showVolumeBarTemporarily, setShowControls, setVolume, setIsMuted, isPlaying, volume, isPiPSupported };
     useEffect(() => {
+        const gesture = createArrowKeyGesture(() => videoRef.current);
         const handleKeyDown = (e: KeyboardEvent) => {
+            const { togglePlay, toggleMute, toggleFullscreen, toggleWindowFullscreen, togglePictureInPicture, skipForward, skipBackward, showVolumeBarTemporarily, setShowControls, setVolume, setIsMuted, isPlaying, volume, isPiPSupported } = callbacks.current;
             // Ignore shortcuts if typing in an input
-            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+            if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable="true"]')) {
                 return;
             }
 
-            // Show controls on any key press
-            setShowControls(true);
-            if (controlsTimeoutRef.current) {
-                clearTimeout(controlsTimeoutRef.current);
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                gesture.down(e.key);
+                return;
             }
+
+            // Show controls on any other key press
+            setShowControls(true);
+            clearTimeout(controlsTimeoutRef.current ?? undefined);
             if (isPlaying) {
                 controlsTimeoutRef.current = setTimeout(() => {
                     setShowControls(false);
@@ -79,19 +88,17 @@ export function useDesktopShortcuts({
                         togglePictureInPicture();
                     }
                     break;
-                case 'arrowright':
                 case 'l':
                     e.preventDefault();
                     skipForward();
                     break;
-                case 'arrowleft':
                 case 'j':
                     e.preventDefault();
                     skipBackward();
                     break;
                 case 'arrowup':
                     e.preventDefault();
-                    const newVolUp = Math.min(1, volume + 0.1);
+                    const newVolUp = Math.min(1, volume + 0.05);
                     setVolume(newVolUp);
                     if (videoRef.current) {
                         videoRef.current.volume = newVolUp;
@@ -104,7 +111,7 @@ export function useDesktopShortcuts({
                     break;
                 case 'arrowdown':
                     e.preventDefault();
-                    const newVolDown = Math.max(0, volume - 0.1);
+                    const newVolDown = Math.max(0, volume - 0.05);
                     setVolume(newVolDown);
                     if (videoRef.current) {
                         videoRef.current.volume = newVolDown;
@@ -118,24 +125,20 @@ export function useDesktopShortcuts({
             }
         };
 
+        const handleKeyUp = (event: KeyboardEvent) => {
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') gesture.up(event.key);
+        };
+        const handleVisibility = () => { if (document.hidden) gesture.cancel(); };
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [
-        videoRef,
-        isPlaying,
-        volume,
-        isPiPSupported,
-        togglePlay,
-        toggleMute,
-        toggleFullscreen,
-        toggleWindowFullscreen,
-        togglePictureInPicture,
-        skipForward,
-        skipBackward,
-        showVolumeBarTemporarily,
-        setShowControls,
-        setVolume,
-        setIsMuted,
-        controlsTimeoutRef,
-    ]);
+        window.addEventListener('keyup', handleKeyUp);
+        window.addEventListener('blur', gesture.cancel);
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => {
+            gesture.cancel();
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            window.removeEventListener('blur', gesture.cancel);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
+    }, [videoRef, controlsTimeoutRef]);
 }

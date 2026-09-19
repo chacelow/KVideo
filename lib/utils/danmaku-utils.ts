@@ -57,50 +57,42 @@ export function extractCleanKeywords(rawTitle: string): string[] {
 }
 
 /**
- * 严格相关度校验：确保搜出的源必须与原作品高度吻合，绝不放过任何无关杂音
+ * 纯通用弹幕源质量评分器 (杜绝复杂的硬编码判断，完全基于标题契合度与集数精准匹配打分)
  */
-export function isLegitimateSource(resultTitle: string, targetTitle: string): boolean {
-  if (!resultTitle || !targetTitle) return false;
-  const cleanTarget = targetTitle.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
+export function scoreSourceMatch(
+  anime: DanmakuAnimeSource,
+  videoTitle: string,
+  targetEpisodeNum: number | null
+): number {
+  let score = 0;
+  const titleA = (anime.animeTitle || '').replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
+  const titleB = (videoTitle || '').replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
 
-  // 如果结果标题带有冒号或破折号，冒号前面如果不是目标片名，说明是蹭热度前缀 (例如 '梦中杀诡：我独自升级')，直接剔除！
-  if (resultTitle.includes('：') || resultTitle.includes(':')) {
-    const prefix = resultTitle.split(/[：:]/)[0].replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
-    if (!prefix.includes(cleanTarget)) {
-      return false;
+  // 1. 标题完全相等或主干高度包含: 基础 50 分
+  if (titleA.includes(titleB) || titleB.includes(titleA)) {
+    score += 50;
+  }
+  if (titleA.startsWith(titleB)) {
+    score += 30; // 核心词前置加 30 分
+  }
+
+  // 2. 当前观看集数精准对应: 关键加分 40 分
+  if (targetEpisodeNum !== null && anime.episodes && anime.episodes.length > 0) {
+    const hasExactEpisode = anime.episodes.some(
+      (ep) => extractNumber(ep.episodeTitle) === targetEpisodeNum
+    );
+    if (hasExactEpisode) {
+      score += 40;
     }
   }
 
-  // 必须以目标核心名开头
-  const cleanResult = resultTitle.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
-  return cleanResult.startsWith(cleanTarget);
-}
-
-/**
- * 季度精准对齐排序：如果用户看的是第1季，优先排列第1季；若看第2季，优先排列第2季
- */
-export function sortSourcesBySeason(sources: DanmakuAnimeSource[], userTitle: string): DanmakuAnimeSource[] {
-  const isSeason2 = /第二[季部]|第2[季部]|S2|Season\s*2/i.test(userTitle);
-  const isSeason3 = /第三[季部]|第3[季部]|S3|Season\s*3/i.test(userTitle);
-
-  return [...sources].sort((a, b) => {
-    const aTitle = a.animeTitle;
-    const bTitle = b.animeTitle;
-
-    const aIsS2 = /第二[季部]|第2[季部]|S2|Season\s*2/i.test(aTitle);
-    const bIsS2 = /第二[季部]|第2[季部]|S2|Season\s*2/i.test(bTitle);
-
-    if (isSeason2) {
-      if (aIsS2 && !bIsS2) return -1;
-      if (!aIsS2 && bIsS2) return 1;
-    } else if (!isSeason3) {
-      // 默认第1季：优先非第2季、非第3季
-      if (!aIsS2 && bIsS2) return -1;
-      if (aIsS2 && !bIsS2) return 1;
-    }
-
-    return 0;
-  });
+  // 3. 弹弹play全量弹幕网络加权 (包含全网聚合与无风控弹幕池，优先呈现)
+  if (anime.animeTitle.includes('dandan')) {
+    score += 25;
+  } else if (anime.animeTitle.includes('bilibili') || anime.animeTitle.includes('tencent')) {
+    score += 10;
+  }
+  return score;
 }
 
 /**
@@ -254,7 +246,7 @@ const CHINESE_NUMS: Record<string, number> = {
   '十六': 16, '十七': 17, '十八': 18, '十九': 19, '二十': 20,
 };
 
-function extractNumber(str: string): number | null {
+export function extractNumber(str: string): number | null {
   const numMatch = str.match(/(?:第\s*)?(\d+)(?:\s*[集话話期])?/);
   if (numMatch) return parseInt(numMatch[1], 10);
 

@@ -48,8 +48,9 @@ export async function GET() {
         const cardRegex = /<div[^>]+class=["']module-item-note["']>([^<]+)<\/div>[\s\S]*?<img[^>]+(?:src|data-original)=["']([^"']+)["'][^>]+alt=["']([^"']+)["']/g;
         let m: RegExpExecArray | null;
         const items: WeekdayAnime[] = [];
+        const dayHtml = parts[dayId] || '';
 
-        while ((m = cardRegex.exec(p)) !== null) {
+        while ((m = cardRegex.exec(dayHtml)) !== null) {
           const note = m[1]?.trim() || '连载中';
           const cover = m[2]?.trim();
           const title = m[3]?.trim();

@@ -96,7 +96,7 @@ export function useDesktopPlayerLogic({
     } = actions;
 
     const playbackControls = usePlaybackControls({
-        videoRef, isPlaying, setIsPlaying, setIsLoading,
+        videoRef, isPlaying, setIsPlaying, setIsLoading, src,
         initialTime, shouldAutoPlay, setDuration, setBufferedTime, setCurrentTime, onTimeUpdate, onError,
         isDraggingProgressRef, speedMenuTimeoutRef, playbackRate, setPlaybackRate, setShowSpeedMenu,
         volume, isMuted

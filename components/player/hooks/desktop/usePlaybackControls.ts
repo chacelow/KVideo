@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { formatTime } from '@/lib/utils/format-utils';
 import { usePlaybackPolling } from '../usePlaybackPolling';
 
@@ -8,6 +8,7 @@ interface UsePlaybackControlsProps {
     setIsPlaying: (playing: boolean) => void;
     setIsLoading: (loading: boolean) => void;
     initialTime: number;
+    src: string;
     shouldAutoPlay: boolean;
     setDuration: (duration: number) => void;
     setBufferedTime: (time: number) => void;
@@ -28,6 +29,7 @@ export function usePlaybackControls({
     isPlaying,
     setIsPlaying,
     setIsLoading,
+    src,
     initialTime,
     shouldAutoPlay,
     setDuration,
@@ -43,6 +45,11 @@ export function usePlaybackControls({
     volume,
     isMuted
 }: UsePlaybackControlsProps) {
+    const pendingInitialSeekSrcRef = useRef(src);
+
+    useEffect(() => {
+        pendingInitialSeekSrcRef.current = src;
+    }, [src]);
     const updateBufferedTime = useCallback(() => {
         if (!videoRef.current) return;
 
@@ -104,12 +111,9 @@ export function usePlaybackControls({
         // Removed setIsLoading(false) because metadata loading is too early.
         // We wait for onCanPlay to set isLoading to false.
 
-        // Fix for stuck at 00:00:00:
-        // Only seek if we are at the very start (to avoid overwriting a previous seek)
-        if (videoRef.current.currentTime < 0.5) {
-            // If initialTime is 0, we seek to a tiny offset to help the browser/HLS buffer start.
-            const startPosition = initialTime > 0 ? initialTime : 0.1;
-            videoRef.current.currentTime = startPosition;
+        if (pendingInitialSeekSrcRef.current === src) {
+            videoRef.current.currentTime = initialTime > 0 ? initialTime : 0.1;
+            pendingInitialSeekSrcRef.current = '';
         }
 
         // Apply saved playback rate when new source loads (for episode changes)
@@ -124,19 +128,15 @@ export function usePlaybackControls({
         videoRef.current.play().catch((err: Error) => {
             console.warn('Autoplay was prevented:', err);
         });
-    }, [videoRef, setDuration, updateBufferedTime, initialTime, playbackRate, volume, isMuted]);
+    }, [videoRef, setDuration, updateBufferedTime, src, initialTime, playbackRate, volume, isMuted]);
 
-    // Handle late initialization of initialTime (e.g. from async storage hydration)
     useEffect(() => {
-        if (initialTime > 0 && videoRef.current) {
-            // Only seek if we haven't progressed far (e.g. still near start)
-            // AND if the target time is significantly different from current time (> 0.5s)
-            // This prevents jumping if the user has already started watching and initialTime updates
-            if (videoRef.current.currentTime < 2 && Math.abs(videoRef.current.currentTime - initialTime) > 0.5) {
-                videoRef.current.currentTime = initialTime;
-            }
+        if (initialTime <= 0 || !videoRef.current || pendingInitialSeekSrcRef.current !== src) return;
+        if (videoRef.current.readyState >= HTMLMediaElement.HAVE_METADATA) {
+            videoRef.current.currentTime = initialTime;
+            pendingInitialSeekSrcRef.current = '';
         }
-    }, [initialTime, videoRef]);
+    }, [initialTime, src, videoRef]);
 
     // Force autoplay when shouldAutoPlay is true (for proxy retry)
     useEffect(() => {

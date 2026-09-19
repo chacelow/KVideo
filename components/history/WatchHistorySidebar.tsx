@@ -47,6 +47,12 @@ export function WatchHistorySidebar({ isPremium = false }: { isPremium?: boolean
       }
     };
   }, [isOpen]);
+  // 监听全局触发事件：从 Navbar 左侧一键打开/收起历史记录
+  useEffect(() => {
+    const handleToggle = () => setIsOpen((prev) => !prev);
+    window.addEventListener('kvideo-toggle-history', handleToggle);
+    return () => window.removeEventListener('kvideo-toggle-history', handleToggle);
+  }, []);
 
   // Handle escape key to close sidebar
   useEffect(() => {
@@ -119,10 +125,10 @@ export function WatchHistorySidebar({ isPremium = false }: { isPremium?: boolean
         aria-labelledby="history-sidebar-title"
         aria-hidden={!isOpen}
         style={{
-          transform: isOpen ? 'translate3d(0, 0, 0)' : 'translate3d(100%, 0, 0)',
+          transform: isOpen ? 'translate3d(0, 0, 0)' : 'translate3d(-100%, 0, 0)',
           willChange: isOpen ? 'transform' : 'auto'
         }}
-        className={`fixed top-0 right-0 bottom-0 w-[85%] sm:w-[90%] max-w-[420px] z-[2000] bg-[var(--glass-bg)] backdrop-blur-[8px] saturate-[120%] border-l border-[var(--glass-border)] rounded-tl-[var(--radius-2xl)] rounded-bl-[var(--radius-2xl)] p-6 flex flex-col shadow-[0_8px_32px_rgba(0,0,0,0.2)] transition-transform duration-250 ease-out`}
+        className="fixed inset-y-0 left-0 z-[2000] flex w-[85%] max-w-[420px] flex-col border-r border-[var(--glass-border)] bg-[var(--bg-color)] p-3 transition-transform duration-150"
       >
         <HistoryHeader onClose={() => setIsOpen(false)} />
 

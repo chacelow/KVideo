@@ -16,16 +16,20 @@ interface VideoData {
   episodes?: Array<{ name?: string; url: string }>;
 }
 
-interface UseVideoPlayerReturn {
+export interface UseVideoPlayerReturn {
   videoData: VideoData | null;
   loading: boolean;
   videoError: string;
   currentEpisode: number;
   playUrl: string;
+  activeVideoId: string | null;
+  activeSource: string | null;
+  resumePosition: number | null;
   setCurrentEpisode: (index: number) => void;
   setPlayUrl: (url: string) => void;
   setVideoError: (error: string) => void;
   fetchVideoDetails: () => Promise<void>;
+  switchSource: (targetId: string, targetSource: string, position: number) => Promise<void>;
 }
 
 export function useVideoPlayer(
@@ -36,14 +40,17 @@ export function useVideoPlayer(
   onSourceUnavailable?: () => void
 ): UseVideoPlayerReturn {
   const [videoData, setVideoData] = useState<VideoData | null>(null);
-  // Initialize loading to true if we have the necessary params to start fetching
   const [loading, setLoading] = useState(!!(videoId && source));
-  const [currentEpisode, setCurrentEpisode] = useState(0);
+  const [currentEpisode, setCurrentEpisodeState] = useState(0);
   const [playUrl, setPlayUrl] = useState('');
   const [videoError, setVideoError] = useState<string>('');
-
-  // Refs to keep track of latest values for the fetch function without re-triggering it
-  // This solves the stale closure problem while keeping fetchVideoDetails stable for the player
+  const [activeVideoId, setActiveVideoId] = useState<string | null>(videoId);
+  const [activeSource, setActiveSource] = useState<string | null>(source);
+  const [resumePosition, setResumePosition] = useState<number | null>(null);
+  const requestSequenceRef = useRef(0);
+  const activeVideoIdRef = useRef(videoId);
+  const activeSourceRef = useRef(source);
+  const currentEpisodeRef = useRef(0);
   const episodeParamRef = useRef(episodeParam);
   const isReversedRef = useRef(isReversed);
   const onSourceUnavailableRef = useRef(onSourceUnavailable);
@@ -60,40 +67,41 @@ export function useVideoPlayer(
     onSourceUnavailableRef.current = onSourceUnavailable;
   }, [onSourceUnavailable]);
 
+  const setCurrentEpisode = useCallback((index: number) => {
+    currentEpisodeRef.current = index;
+    setResumePosition(null);
+    setCurrentEpisodeState(index);
+  }, []);
 
-
-  const fetchVideoDetails = useCallback(async () => {
-    if (!videoId || !source) return;
+  const loadVideoDetails = useCallback(async (
+    targetVideoId: string,
+    targetSource: string,
+    requestedEpisode: number | null,
+    position: number | null,
+  ) => {
+    const requestSequence = ++requestSequenceRef.current;
+    setVideoError('');
+    setLoading(true);
 
     try {
-      // Don't clear error immediately if we are just retrying silently, 
-      // but for manual retry or initial load we should.
-      // Let's clear it to show loading state if we want, or keep it.
-      // Standard behavior: clear error and show loading.
-      setVideoError('');
-      setLoading(true);
-
       const settings = settingsStore.getSettings();
       const allSources = [
         ...settings.sources,
         ...settings.premiumSources,
         ...settings.subscriptions,
       ];
-
-      const sourceConfig = allSources.find(s => s.id === source);
-      let response;
-
-      if (sourceConfig) {
-        response = await fetch('/api/detail', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: videoId, source: sourceConfig })
-        });
-      } else {
-        response = await fetch(`/api/detail?id=${videoId}&source=${source}`);
-      }
-
+      const sourceConfig = allSources.find((item) => item.id === targetSource);
+      const response = sourceConfig
+        ? await fetch('/api/detail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: targetVideoId, source: sourceConfig }),
+          })
+        : await fetch(`/api/detail?id=${encodeURIComponent(targetVideoId)}&source=${encodeURIComponent(targetSource)}`);
       const data = await response.json();
+
+      if (requestSequence !== requestSequenceRef.current) return;
+
       const sourceUnavailable =
         response.status === 404 ||
         (response.status === 400 && typeof data?.error === 'string' && data.error.toLowerCase().includes('source')) ||
@@ -102,91 +110,99 @@ export function useVideoPlayer(
       if (!response.ok) {
         if (sourceUnavailable) {
           setVideoError(data.error || '该视频源不可用。请返回并尝试其他来源。');
-          setLoading(false);
           onSourceUnavailableRef.current?.();
           return;
         }
         throw new Error(data.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
-      if (data.success && data.data) {
-        setVideoData(data.data);
-        setLoading(false);
-
-        if (data.data.episodes && data.data.episodes.length > 0) {
-          const latestIsReversed = isReversedRef.current;
-          const latestEpisodeParam = episodeParamRef.current;
-
-          const defaultIndex = latestIsReversed ? data.data.episodes.length - 1 : 0;
-          const episodeIndex = latestEpisodeParam ? parseInt(latestEpisodeParam, 10) : defaultIndex;
-          const validIndex = (episodeIndex >= 0 && episodeIndex < data.data.episodes.length) ? episodeIndex : defaultIndex;
-
-          const episodeUrl = data.data.episodes[validIndex].url;
-          setCurrentEpisode(validIndex);
-          setPlayUrl(episodeUrl);
-        } else {
-          setVideoError('该来源没有可播放的剧集');
-          setLoading(false);
-        }
-      } else {
+      if (!data.success || !data.data) {
         throw new Error(data.error || '来自 API 的响应无效');
       }
+
+      const nextVideoData = data.data as VideoData;
+      if (!nextVideoData.episodes?.length) {
+        setVideoError('该来源没有可播放的剧集');
+        return;
+      }
+
+      const defaultIndex = isReversedRef.current ? nextVideoData.episodes.length - 1 : 0;
+      const validIndex = requestedEpisode !== null && requestedEpisode >= 0 && requestedEpisode < nextVideoData.episodes.length
+        ? requestedEpisode
+        : defaultIndex;
+
+      activeVideoIdRef.current = targetVideoId;
+      activeSourceRef.current = targetSource;
+      currentEpisodeRef.current = validIndex;
+      setActiveVideoId(targetVideoId);
+      setActiveSource(targetSource);
+      setVideoData(nextVideoData);
+      setCurrentEpisodeState(validIndex);
+      setResumePosition(position === null ? null : Math.max(0, Number.isFinite(position) ? position : 0));
+      setPlayUrl(nextVideoData.episodes[validIndex].url);
     } catch (error) {
+      if (requestSequence !== requestSequenceRef.current) return;
       console.error('Failed to fetch video details:', error);
       setVideoError(error instanceof Error ? error.message : '加载视频详情失败。');
-      setLoading(false);
+    } finally {
+      if (requestSequence === requestSequenceRef.current) setLoading(false);
     }
-  }, [videoId, source]);
+  }, []);
+
+  const fetchVideoDetails = useCallback(async () => {
+    const targetVideoId = activeVideoIdRef.current;
+    const targetSource = activeSourceRef.current;
+    if (!targetVideoId || !targetSource) return;
+
+    const parsedEpisode = episodeParamRef.current === null ? NaN : Number.parseInt(episodeParamRef.current, 10);
+    await loadVideoDetails(
+      targetVideoId,
+      targetSource,
+      Number.isNaN(parsedEpisode) ? currentEpisodeRef.current : parsedEpisode,
+      resumePosition,
+    );
+  }, [loadVideoDetails, resumePosition]);
+
+  const switchSource = useCallback(async (targetId: string, targetSource: string, position: number) => {
+    if (!targetId || !targetSource) return;
+    await loadVideoDetails(targetId, targetSource, currentEpisodeRef.current, position);
+  }, [loadVideoDetails]);
+
+
 
   // EFFECT: Retry logic when settings change (e.g., sources loaded from subscriptions)
   useEffect(() => {
-    if (!videoId || !source || !videoError) return;
+    if (!activeVideoId || !activeSource || !videoError) return;
 
     const unsubscribe = settingsStore.subscribe(() => {
-      // If we are currently in an error state (likely "Invalid source configuration"),
-      // and settings updated (likely new sources arrived), try fetching again.
-      // We can be smarter: check if the source ID now exists in the store.
       const settings = settingsStore.getSettings();
-      const allSources = [
-        ...settings.sources,
-        ...settings.premiumSources,
-        ...settings.subscriptions, // note: subscription items aren't usually video sources directly but let's check broadly
-      ];
-
-      // We really need to check if the specific source ID is now available
-      // But since 'subscriptions' in store expands into 'sources'/'premiumSources',
-      // we just check if any sources exist now.
-      if (allSources.length > 0) {
-        console.log("Settings updated, retrying video fetch...");
+      const allSources = [...settings.sources, ...settings.premiumSources, ...settings.subscriptions];
+      if (allSources.some((item) => item.id === activeSource)) {
         fetchVideoDetails();
       }
     });
 
     return () => unsubscribe();
-  }, [videoId, source, videoError, fetchVideoDetails]);
-
-  // Sync state from params if they change externally (e.g. back/forward navigation)
-  useEffect(() => {
-    if (videoData?.episodes && episodeParam !== null) {
-      const index = parseInt(episodeParam, 10);
-      if (!isNaN(index) && index >= 0 && index < videoData.episodes.length) {
-        if (index !== currentEpisode) {
-          setCurrentEpisode(index);
-          setPlayUrl(videoData.episodes[index].url);
-        }
-      }
-    }
-  }, [episodeParam, videoData, currentEpisode]);
+  }, [activeVideoId, activeSource, videoError, fetchVideoDetails]);
 
   useEffect(() => {
-    if (videoId && source) {
-      // Reset state when source changes to ensure clean fetch
-      setVideoData(null);
-      setCurrentEpisode(0);
-      setPlayUrl('');
-      fetchVideoDetails();
+    if (!videoData?.episodes || episodeParam === null) return;
+    const index = Number.parseInt(episodeParam, 10);
+    if (!Number.isNaN(index) && index >= 0 && index < videoData.episodes.length && index !== currentEpisodeRef.current) {
+      currentEpisodeRef.current = index;
+      setCurrentEpisodeState(index);
+      setResumePosition(null);
+      setPlayUrl(videoData.episodes[index].url);
     }
-  }, [videoId, source, fetchVideoDetails]);
+  }, [episodeParam, videoData]);
+
+  useEffect(() => {
+    if (!videoId || !source) return;
+    activeVideoIdRef.current = videoId;
+    activeSourceRef.current = source;
+    const parsedEpisode = episodeParam === null ? NaN : Number.parseInt(episodeParam, 10);
+    loadVideoDetails(videoId, source, Number.isNaN(parsedEpisode) ? null : parsedEpisode, null);
+  }, [videoId, source, loadVideoDetails]);
 
   return {
     videoData,
@@ -194,9 +210,13 @@ export function useVideoPlayer(
     videoError,
     currentEpisode,
     playUrl,
+    activeVideoId,
+    activeSource,
+    resumePosition,
     setCurrentEpisode,
     setPlayUrl,
     setVideoError,
     fetchVideoDetails,
+    switchSource,
   };
 }

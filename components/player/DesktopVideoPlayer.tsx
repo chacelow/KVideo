@@ -108,6 +108,7 @@ export function DesktopVideoPlayer({
   const { refs, data, actions } = useDesktopPlayerState();
   const { fullscreenType: settingsFullscreenType } = usePlayerSettings(isPremium);
   const isMobile = useIsMobile();
+  const isIOS = useIsIOS();
   const [viewportMetrics, setViewportMetrics] = React.useState<ViewportMetrics>(() => readViewportMetrics());
   const [seekStepSeconds, setSeekStepSeconds] = React.useState(DEFAULT_SEEK_STEP_SECONDS);
   const [webFullscreenSize, setWebFullscreenSize] = React.useState<WebFullscreenSize>(() => {
@@ -136,6 +137,38 @@ export function DesktopVideoPlayer({
   const danmaku = externalDanmaku || internalDanmaku;
   const { danmakuEnabled, comments: danmakuComments, danmakuOffset } = danmaku;
   const [internalSidebarOpen, setInternalSidebarOpen] = React.useState(false);
+
+  // B站同款：长按画面/右键进入 3.0X 倍速快进状态
+  const fastForwardTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [isFastForwarding, setIsFastForwarding] = React.useState(false);
+  const preFastRateRef = React.useRef(1.0);
+  const didLongPressRef = React.useRef(false);
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    didLongPressRef.current = false;
+    clearTimeout(fastForwardTimerRef.current || undefined);
+    fastForwardTimerRef.current = setTimeout(() => {
+      if (refs.videoRef.current) {
+        didLongPressRef.current = true;
+        preFastRateRef.current = refs.videoRef.current.playbackRate;
+        refs.videoRef.current.playbackRate = 3.0;
+        setIsFastForwarding(true);
+      }
+    }, 250);
+  };
+
+  const handlePointerUp = () => {
+    clearTimeout(fastForwardTimerRef.current || undefined);
+    fastForwardTimerRef.current = null;
+    if (isFastForwarding) {
+      if (refs.videoRef.current) {
+        refs.videoRef.current.playbackRate = preFastRateRef.current || 1.0;
+      }
+      setIsFastForwarding(false);
+    }
+  };
+
+
   const updateViewportMetrics = React.useCallback(() => {
     setViewportMetrics((current) => {
       const next = readViewportMetrics();
@@ -271,6 +304,7 @@ export function DesktopVideoPlayer({
     seekStepSeconds,
   });
 
+
   // Auto-skip intro/outro and auto-next episode
   const { isTransitioningToNextEpisode } = useAutoSkip({
     videoRef,
@@ -376,6 +410,7 @@ export function DesktopVideoPlayer({
       style={containerStyle}
       onMouseMove={() => { handleMouseMove(); }}
       onMouseLeave={() => isPlaying && setShowControls(false)}
+      tabIndex={-1}
     >
       <div className={stageClassName}>
         {/* Clipping Wrapper for video and overlays - Restores the 'Liquid Glass' rounded look */}
@@ -398,12 +433,32 @@ export function DesktopVideoPlayer({
             onError={handleVideoError}
             onWaiting={() => setIsLoading(true)}
             onCanPlay={() => setIsLoading(false)}
+            onPlaying={() => setIsLoading(false)}
             onClick={!isMobile ? () => {
-              togglePlay();
+              if (!didLongPressRef.current) {
+                logic.togglePlay();
+              }
             } : undefined}
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+            onContextMenu={(e) => {
+              // 阻止长按右键弹出浏览器默认菜单，保证 3 倍速顺畅体验
+              if (isFastForwarding) e.preventDefault();
+            }}
             onTouchStart={isMobile ? handleTap : undefined}
             {...LEGACY_INLINE_VIDEO_PROPS} // Legacy iOS support
           />
+
+          {/* B站同款：3.0X 极速快进浮层指示 */}
+          {isFastForwarding && (
+            <div className="absolute top-8 inset-x-0 flex justify-center z-40 pointer-events-none animate-in fade-in-0 zoom-in-95 duration-100">
+              <div className="px-4 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-amber-400/50 text-amber-400 font-black text-xs sm:text-sm flex items-center gap-2 shadow-2xl">
+                <span className="animate-pulse text-amber-400 text-sm">⚡</span>
+                <span>3.0X 快进中 &gt;&gt;</span>
+              </div>
+            </div>
+          )}
 
           {/* Danmaku Canvas (应用时间轴偏移微调) */}
           {danmakuEnabled && danmakuComments.length > 0 && (
@@ -487,10 +542,10 @@ export function DesktopVideoPlayer({
 
             {/* 仅在全屏模式下：播放器内部右侧滑入抽屉 (普通模式已由外部并排展示) */}
             {data.isFullscreen && internalSidebarOpen && (
-              <div className="absolute inset-0 z-50 flex justify-end pointer-events-auto overflow-hidden animate-in fade-in-0 duration-200">
+              <div data-player-sidebar className="absolute inset-0 z-50 flex justify-end pointer-events-auto overflow-hidden animate-in fade-in-0 duration-200">
                 <div
                   className="flex-1 bg-black/40 backdrop-blur-[2px] transition-opacity cursor-pointer"
-                  onClick={() => setIsDanmakuSidebarOpen(false)}
+                  onClick={() => setInternalSidebarOpen(false)}
                 />
                 {/* 右侧侧边栏面板 (宽 400px ~ 420px) */}
                 <div className="w-[420px] max-w-[85vw] h-full shadow-2xl animate-in slide-in-from-right-full duration-250 border-l border-white/10 bg-[#141517]/98 z-10">

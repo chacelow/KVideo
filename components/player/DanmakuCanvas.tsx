@@ -133,7 +133,10 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
   const lastRafTimeRef = useRef(0);
   const rafRef = useRef<number>(0);
   const lastSpawnTimeRef = useRef(-1);
-  const laneSlotsRef = useRef<number[]>(new Array(MAX_LANES).fill(0));
+  // 三套完全解耦独立的轨道槽系统 (B站标准：互不抢占、互不干扰、支持Overlap)
+  const scrollLaneSlotsRef = useRef<number[]>(new Array(MAX_LANES).fill(0));
+  const topLaneSlotsRef = useRef<number[]>(new Array(8).fill(0));
+  const bottomLaneSlotsRef = useRef<number[]>(new Array(8).fill(0));
   const metricsRef = useRef<DanmakuCanvasMetrics | null>(null);
 
   // 监听全局弹幕配置变更 (速度、字号、透明度、区域、过滤规则、重复聚合)
@@ -152,6 +155,25 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
     mergeDuplicatesToTop = true,
     cleanLikeBadges = true,
   } = config;
+
+  // 【核心功能】：拖动速度滑块时，实时应用到每一个已经在屏幕上飞跑的弹幕！
+  const currentSpeedRef = useRef(speed);
+  useEffect(() => {
+    if (currentSpeedRef.current !== speed) {
+      currentSpeedRef.current = speed;
+      const canvasWidth = metricsRef.current?.width || window.innerWidth || 1280;
+
+      activeRef.current = activeRef.current.map((d) => {
+        if (d.comment.type === 'scroll' || !d.comment.type) {
+          return {
+            ...d,
+            speed: (canvasWidth + d.width) / speed,
+          };
+        }
+        return d;
+      });
+    }
+  }, [speed]);
 
   const syncCanvasSize = useCallback(() => {
     const canvas = canvasRef.current;
@@ -176,32 +198,46 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
 
     if (previous && dimensionsChanged) {
       const effectiveHeight = next.height * displayArea;
+      const laneHeight = fontSize * LANE_HEIGHT_FACTOR;
 
       activeRef.current = activeRef.current.map((danmaku) => {
         const type = danmaku.comment.type || 'scroll';
-        const y = clampDanmakuY(
-          scaleDanmakuCoordinate(danmaku.y, previous.height, next.height),
-          fontSize,
-          effectiveHeight
-        );
 
-        if (type === 'scroll') {
+        // 1. 顶部弹幕：严格吸顶排布，随窗口尺寸自适应居中，绝不拉伸变形
+        if (type === 'top' || danmaku.isTopMerged) {
           return {
             ...danmaku,
-            x: scaleDanmakuCoordinate(danmaku.x, previous.width, next.width),
-            y,
-            speed: (next.width + danmaku.width) / speed,
+            x: (next.width - danmaku.width) / 2,
+            y: danmaku.lane * laneHeight + fontSize,
           };
         }
 
+        // 2. 底部弹幕：严格贴底排布，随窗口放大缩小自适应贴紧新底部
+        if (type === 'bottom') {
+          return {
+            ...danmaku,
+            x: (next.width - danmaku.width) / 2,
+            y: effectiveHeight - danmaku.lane * laneHeight - fontSize * 0.4,
+          };
+        }
+
+        // 3. 滚动弹幕：纵向锁定在对应滚动轨道，横向等比映射
+        const y = clampDanmakuY(
+          danmaku.lane * laneHeight + fontSize,
+          fontSize,
+          effectiveHeight
+        );
         return {
           ...danmaku,
-          x: (next.width - danmaku.width) / 2,
+          x: scaleDanmakuCoordinate(danmaku.x, previous.width, next.width),
           y,
+          speed: (next.width + danmaku.width) / speed,
         };
       });
 
-      laneSlotsRef.current = new Array(MAX_LANES).fill(0);
+      scrollLaneSlotsRef.current = new Array(MAX_LANES).fill(0);
+      topLaneSlotsRef.current = new Array(8).fill(0);
+      bottomLaneSlotsRef.current = new Array(8).fill(0);
     }
 
     metricsRef.current = next;
@@ -234,7 +270,6 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
         rafId = null;
         syncCanvasSize();
       });
-      timeoutIds = [window.setTimeout(syncCanvasSize, 120), window.setTimeout(syncCanvasSize, 360)];
     };
 
     scheduleResize();
@@ -276,7 +311,9 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
       const windowEnd = targetTime;
 
       activeRef.current = [];
-      laneSlotsRef.current = new Array(MAX_LANES).fill(0);
+      scrollLaneSlotsRef.current = new Array(MAX_LANES).fill(0);
+      topLaneSlotsRef.current = new Array(8).fill(0);
+      bottomLaneSlotsRef.current = new Array(8).fill(0);
       lastSpawnTimeRef.current = targetTime;
 
       let lo = 0,
@@ -311,7 +348,7 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
             for (let lane = 0; lane < MAX_LANES; lane++) {
               const yPos = lane * laneHeight + fontSize;
               if (yPos > effectiveHeight - fontSize) break;
-              if (laneSlotsRef.current[lane] <= c.time) {
+              if (scrollLaneSlotsRef.current[lane] <= c.time) {
                 bestLane = lane;
                 break;
               }
@@ -319,8 +356,7 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
             if (bestLane === -1) bestLane = (i % Math.floor(effectiveHeight / laneHeight)) || 0;
 
             const timeToPassStartPoint = textWidth / scrollSpeed + 0.6;
-            laneSlotsRef.current[bestLane] = c.time + timeToPassStartPoint;
-
+            scrollLaneSlotsRef.current[bestLane] = c.time + timeToPassStartPoint;
             activeRef.current.push({
               comment: { ...c, text: cleanedText, color: finalColor },
               x: currentX,
@@ -374,7 +410,9 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
     if (commentsVersionRef.current !== comments) {
       commentsVersionRef.current = comments;
       activeRef.current = [];
-      laneSlotsRef.current = new Array(MAX_LANES).fill(0);
+      scrollLaneSlotsRef.current = new Array(MAX_LANES).fill(0);
+      topLaneSlotsRef.current = new Array(8).fill(0);
+      bottomLaneSlotsRef.current = new Array(8).fill(0);
       lastSpawnTimeRef.current = lastTimeRef.current;
     }
   }, [comments]);
@@ -432,10 +470,10 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
               existing.speed = 0;
               // 寻找一条顶部轨道
               for (let lane = 0; lane < 4; lane++) {
-                if (laneSlotsRef.current[lane] <= time + 4.2) {
+                if (topLaneSlotsRef.current[lane] <= time + 4.2) {
                   existing.lane = lane;
                   existing.y = lane * laneHeight + fontSize;
-                  laneSlotsRef.current[lane] = time + 4.2;
+                  topLaneSlotsRef.current[lane] = time + 4.2;
                   break;
                 }
               }
@@ -466,21 +504,22 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
         const finalColor = showColor ? c.color : '#ffffff';
 
         if (type === 'scroll') {
+          // 滚动弹幕：只占用滚动专用轨道，从顶部和底部弹幕下方穿流而过 (完美Overlap)
           const scrollSpeed = (canvasWidth + textWidth) / speed;
           let bestLane = -1;
 
           for (let lane = 0; lane < MAX_LANES; lane++) {
             const yPos = lane * laneHeight + fontSize;
             if (yPos > effectiveHeight - fontSize) break;
-            if (laneSlotsRef.current[lane] <= time) {
+            if (scrollLaneSlotsRef.current[lane] <= time) {
               bestLane = lane;
               break;
             }
           }
-          if (bestLane === -1) continue; // 轨道已满防重叠
+          if (bestLane === -1) continue; // 滚动轨道已满，防重叠丢弃
 
           const timeToPassStartPoint = textWidth / scrollSpeed + 0.6;
-          laneSlotsRef.current[bestLane] = time + timeToPassStartPoint;
+          scrollLaneSlotsRef.current[bestLane] = time + timeToPassStartPoint;
 
           activeRef.current.push({
             comment: {
@@ -497,24 +536,17 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
             repeatCount: 1,
             isTopMerged: false,
           });
-        } else {
-          // 顶部或底部固定弹幕
-          const maxLanes = Math.floor(effectiveHeight / laneHeight / 2);
+        } else if (type === 'top') {
+          // 顶部固定弹幕：专用顶部独立轨道槽，从最顶端顺次向下堆叠 (第0、1、2轨)
           let bestLane = -1;
-          for (let lane = 0; lane < Math.min(maxLanes, MAX_LANES); lane++) {
-            const laneKey = type === 'top' ? lane : MAX_LANES - 1 - lane;
-            if (laneSlotsRef.current[laneKey] <= time) {
+          for (let lane = 0; lane < 6; lane++) {
+            if (topLaneSlotsRef.current[lane] <= time) {
               bestLane = lane;
-              laneSlotsRef.current[laneKey] = time + TOP_BOTTOM_DURATION;
+              topLaneSlotsRef.current[lane] = time + TOP_BOTTOM_DURATION;
               break;
             }
           }
           if (bestLane === -1) continue;
-
-          const y =
-            type === 'top'
-              ? bestLane * laneHeight + fontSize
-              : effectiveHeight - bestLane * laneHeight - fontSize * 0.4;
 
           activeRef.current.push({
             comment: {
@@ -524,13 +556,41 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
               _expiry: time + TOP_BOTTOM_DURATION,
             },
             x: (canvasWidth - textWidth) / 2,
-            y,
+            y: bestLane * laneHeight + fontSize,
             speed: 0,
             width: textWidth,
             lane: bestLane,
             rawBaseText: cleanedText,
             repeatCount: 1,
-            isTopMerged: type === 'top',
+            isTopMerged: true,
+          });
+        } else {
+          // 底部固定弹幕：专用底部独立轨道槽，从最底端顺次向上堆叠
+          let bestLane = -1;
+          for (let lane = 0; lane < 6; lane++) {
+            if (bottomLaneSlotsRef.current[lane] <= time) {
+              bestLane = lane;
+              bottomLaneSlotsRef.current[lane] = time + TOP_BOTTOM_DURATION;
+              break;
+            }
+          }
+          if (bestLane === -1) continue;
+
+          activeRef.current.push({
+            comment: {
+              ...c,
+              text: cleanedText,
+              color: finalColor,
+              _expiry: time + TOP_BOTTOM_DURATION,
+            },
+            x: (canvasWidth - textWidth) / 2,
+            y: effectiveHeight - bestLane * laneHeight - fontSize * 0.4,
+            speed: 0,
+            width: textWidth,
+            lane: bestLane,
+            rawBaseText: cleanedText,
+            repeatCount: 1,
+            isTopMerged: false,
           });
         }
       }
@@ -561,11 +621,10 @@ export function DanmakuCanvas({ comments, currentTime, isPlaying }: DanmakuCanva
 
       const metrics = metricsRef.current ?? syncCanvasSize();
       if (!metrics) return;
-
-      const delta = lastRafTimeRef.current ? (timestamp - lastRafTimeRef.current) / 1000 : 0;
+      const videoEl = canvas.parentElement?.querySelector('video');
+      const currentRate = videoEl ? videoEl.playbackRate || 1.0 : 1.0;
+      const delta = lastRafTimeRef.current ? ((timestamp - lastRafTimeRef.current) / 1000) * currentRate : 0;
       lastRafTimeRef.current = timestamp;
-
-      ctx.save();
       ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
       ctx.clearRect(0, 0, metrics.width, metrics.height);
 

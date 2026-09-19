@@ -119,8 +119,7 @@ export function DesktopControlsWrapper({
             formatTime={formatTime}
             onProgressClick={handleProgressClick}
             onProgressMouseDown={handleProgressMouseDown}
-            onSelectSource={onSelectSource}
-            onEpisodeClick={onEpisodeClick}
+            onProgressTouchStart={handleProgressTouchStart}
             danmaku={danmaku}
             onToggleDanmakuSidebar={onToggleDanmakuSidebar}
             isDanmakuSidebarOpen={isDanmakuSidebarOpen}

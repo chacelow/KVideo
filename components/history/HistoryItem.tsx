@@ -26,7 +26,10 @@ export function HistoryItem({ item, onRemove, isPremium = false }: HistoryItemPr
       title: item.title,
       episode: item.episodeIndex.toString(),
     });
-    // Store sourceMap in sessionStorage to avoid long URLs
+    // 100% 还原上次播放的具体秒数进度
+    if (item.playbackPosition && item.playbackPosition > 1) {
+      params.set('t', Math.floor(item.playbackPosition).toString());
+    }
     if (item.sourceMap && Object.keys(item.sourceMap).length > 1) {
       const groupData = Object.entries(item.sourceMap).map(([sourceName, videoId]) => ({
         id: videoId,

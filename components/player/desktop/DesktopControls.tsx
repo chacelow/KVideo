@@ -47,8 +47,9 @@ interface DesktopControlsProps {
     currentEpisode?: number;
     onSelectSource?: (source: SourceItem) => void;
     onEpisodeClick?: (index: number) => void;
+    playbackRate?: number;
+    onSpeedChange?: (speed: number) => void;
     isPremium?: boolean;
-    isProxied?: boolean;
     onCopyLink?: (type?: 'original' | 'proxy') => void;
     danmaku?: UseDanmakuReturn;
     onToggleDanmakuSidebar?: () => void;

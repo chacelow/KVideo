@@ -28,10 +28,12 @@ export function useHlsPlayer({
     // 使用 ref 保存去广告配置，避免设置变更时触发 HLS 实例销毁打断播放
     const adFilterModeRef = useRef(adFilterMode);
     const adKeywordsRef = useRef(adKeywords);
+    const mediaProxyEnabledRef = useRef(mediaProxyEnabled);
     useEffect(() => {
         adFilterModeRef.current = adFilterMode;
         adKeywordsRef.current = adKeywords;
-    }, [adFilterMode, adKeywords]);
+        mediaProxyEnabledRef.current = mediaProxyEnabled;
+    }, [adFilterMode, adKeywords, mediaProxyEnabled]);
     useEffect(() => {
         const video = videoRef.current;
         if (!video || !src) return;
@@ -50,6 +52,7 @@ export function useHlsPlayer({
 
         // Check if MSE is available (required by HLS.js)
         const isMSESupported = Hls.isSupported();
+        const isAdFilterEnabled = adFilterModeRef.current !== 'off';
 
         if (isMSESupported) {
 
@@ -76,7 +79,7 @@ export function useHlsPlayer({
                     super.load(context, config, callbacks);
                 }
             }
-            const isAdFilterEnabled = adFilterModeRef.current !== 'off';
+
             if (!isNativeHlsSupported || isAdFilterEnabled) {
                 // If ad filtering is on, we force Hls.js even on native-supported desktop browsers
                 // Exceptions might exist for iOS where MSE is strictly not available, check Hls.isSupported() result carefully.
@@ -233,7 +236,7 @@ export function useHlsPlayer({
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return await res.text();
                     } catch (e) {
-                        if (!mediaProxyEnabled) {
+                        if (!mediaProxyEnabledRef.current) {
                             throw e;
                         }
                         console.warn(`[HLS Native] Fetch failed for ${url}, trying proxy...`, e);
@@ -408,7 +411,7 @@ export function useHlsPlayer({
             const handleError = () => {
                 if (directFailed) return;
                 directFailed = true;
-                if (!mediaProxyEnabled) {
+                if (!mediaProxyEnabledRef.current) {
                     onError?.('当前浏览器不支持 HLS 视频播放。建议使用 Chrome、Edge 或 Safari 浏览器。');
                     return;
                 }
@@ -430,5 +433,5 @@ export function useHlsPlayer({
             }
             extraBlobs.forEach(url => URL.revokeObjectURL(url));
         };
-    }, [src, videoRef, autoPlay, onAutoPlayPrevented, onError, mediaProxyEnabled]);
+    }, [src, videoRef, autoPlay, onAutoPlayPrevented, onError]);
 }

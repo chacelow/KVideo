@@ -25,6 +25,7 @@ interface VideoPlayerProps {
   episodeName?: string;
   // Expose current time to parent
   externalTimeRef?: React.MutableRefObject<number>;
+  initialTime?: number | null;
   onResolutionDetected?: (info: VideoResolutionInfo) => void;
   sources?: SourceItem[];
   currentSource?: string;
@@ -47,6 +48,7 @@ export function VideoPlayer({
   videoTitle,
   episodeName,
   externalTimeRef,
+  initialTime,
   onResolutionDetected,
   sources,
   currentSource,
@@ -77,11 +79,12 @@ export function VideoPlayer({
   const searchParams = useSearchParams();
 
   // Get video metadata from URL params
-  const source = searchParams.get('source') || '';
+  const source = currentSource || searchParams.get('source') || '';
   const title = searchParams.get('title') || '未知视频';
 
   // Get saved progress for this video
   const getSavedProgress = () => {
+    if (initialTime !== undefined && initialTime !== null) return initialTime;
     // Check for explicit time parameter (from source switch)
     const timeParam = searchParams.get('t');
     if (timeParam) {
@@ -149,25 +152,23 @@ export function VideoPlayer({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [saveProgress]);
 
-  // Handle video errors
-  const handleVideoError = (error: string) => {
-    console.error('Video playback error:', error);
+  useEffect(() => {
+    setVideoError('');
+  }, [playUrl]);
 
-    // Auto-retry with proxy if:
-    // 1. Not already using proxy
-    // 2. Proxy mode is NOT 'none' (so 'retry' or potentially 'always' if it somehow failed locally)
-    // 3. Proxy mode is 'retry' (specifically for the auto-switch logic)
-    // Note: If mode is 'always', we are already using proxy. If it fails, we show error.
+  // Handle video errors
+  const handleVideoError = useCallback((error: string) => {
+    console.error('Video playback error:', error);
 
     if (!effectiveUseProxy && proxyMode === 'retry') {
       setUseProxy(true);
-      setShouldAutoPlay(true); // Force autoplay after proxy retry
+      setShouldAutoPlay(true);
       setVideoError('');
       return;
     }
 
     setVideoError(error);
-  };
+  }, [effectiveUseProxy, proxyMode]);
 
   const handleRetry = () => {
     if (retryCount >= MAX_MANUAL_RETRIES) return;
@@ -219,7 +220,6 @@ export function VideoPlayer({
         />
       ) : (
         <CustomVideoPlayer
-          key={`${effectiveUseProxy ? 'proxy' : 'direct'}-${retryCount}-${source}-ep${currentEpisode}`}
           src={finalPlayUrl}
           onError={handleVideoError}
           onTimeUpdate={handleTimeUpdate}

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import Link from 'next/link';
 import { ChevronLeft, ChevronRight, Flame, Calendar, Trophy, SlidersHorizontal, Clock } from 'lucide-react';
-
 export interface AnimeRecord {
   id: string | number;
   title: string;
@@ -63,13 +63,17 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
   // 首页地区筛选：全部 | 日漫 | 国漫 | 欧美
   const [areaFilter, setAreaFilter] = useState<string>('all');
 
-  // 番剧索引专属筛选状态 (截图3复刻)
+  // 番剧索引专属筛选状态 (真实上万部番剧库)
   const [indexOrder, setIndexOrder] = useState<'score' | 'hot' | 'time'>('score');
   const [indexArea, setIndexArea] = useState<string>('all');
+  const [indexTag, setIndexTag] = useState<string>('all'); // 真实题材：热血/奇幻/科幻/恋爱...
   const [indexStatus, setIndexStatus] = useState<string>('all');
-  const [indexSeason, setIndexSeason] = useState<string>('all');
   const [indexYear, setIndexYear] = useState<string>('all');
-
+  const [indexPage, setIndexPage] = useState<number>(1);
+  const [catalogTotal, setCatalogTotal] = useState<number>(0);
+  const [catalogPageCount, setCatalogPageCount] = useState<number>(1);
+  const [indexCatalogList, setIndexCatalogList] = useState<AnimeRecord[]>([]);
+  const [isCatalogLoading, setIsCatalogLoading] = useState<boolean>(false);
 
   // 1. 并发拉取权威周历与多维榜单
   useEffect(() => {
@@ -112,6 +116,43 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
       .finally(() => setIsLoading(false));
   }, []);
 
+  // 2. 真实万部番剧索引库拉取 (支持分类、题材标签、年份、状态与分页翻页)
+  useEffect(() => {
+    if (currentView !== 'index') return;
+    setIsCatalogLoading(true);
+
+    const params = new URLSearchParams({
+      area: indexArea,
+      tag: indexTag,
+      year: indexYear,
+      status: indexStatus,
+      page: String(indexPage),
+    });
+
+    fetch(`/api/catalog?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.items)) {
+          setCatalogTotal(data.total || 0);
+          setCatalogPageCount(data.pagecount || 1);
+          const mapped: AnimeRecord[] = data.items.map((it: any) => ({
+            id: it.id,
+            title: it.title,
+            cover: it.cover,
+            rate: it.rate || '8.8',
+            year: it.year,
+            area: indexArea as any,
+            status: it.remarks?.includes('完结') ? 'finished' : 'ongoing',
+            episodes: it.remarks || '正片',
+            tags: it.tags || [],
+            views: '全网热播',
+          }));
+          setIndexCatalogList(mapped);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsCatalogLoading(false));
+  }, [currentView, indexArea, indexTag, indexYear, indexStatus, indexPage]);
   // 当前选中周几的连载番剧 (支持全部/日漫/国漫筛选)
   const currentDayAnimes = useMemo(() => {
     const group = weekdayList.find((g) => g.weekday.id === selectedDay);
@@ -416,20 +457,57 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
               </div>
 
               <span className="text-xs text-[#9499a0]">
-                共筛选出 <span className="text-pink-400 font-bold">{indexedList.length}</span> 部作品
+                共检索到 <span className="text-pink-400 font-bold">{catalogTotal.toLocaleString()}</span> 部番剧
               </span>
             </div>
 
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-7 gap-3">
-              {indexedList.map((anime, idx) => (
-                <CompactAnimeCard
-                  key={`${anime.id}-${idx}`}
-                  anime={anime}
-                  rankNum={indexOrder === 'score' && idx < 10 ? idx + 1 : undefined}
-                  badge={idx < 3 ? 'TOP' : undefined}
-                  onClick={() => onSearch(anime.title)}
-                />
-              ))}
+            {isCatalogLoading ? (
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-7 gap-3">
+                {Array.from({ length: 21 }).map((_, i) => (
+                  <div key={i} className="aspect-[3/4] bg-white/5 rounded-md animate-pulse" />
+                ))}
+              </div>
+            ) : indexCatalogList.length === 0 ? (
+              <div className="text-center py-24 text-[#9499a0] text-sm">
+                未找到符合条件的番剧，可尝试重置筛选或更换题材分类
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-7 gap-3">
+                {indexCatalogList.map((anime, idx) => (
+                  <CompactAnimeCard
+                    key={`${anime.id}-${idx}`}
+                    anime={anime}
+                    onClick={() => onSearch(anime.title)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* 真实分页控制条 (支持几百页翻页漫游) */}
+            <div className="flex items-center justify-center gap-4 mt-8 pt-4 border-t border-white/5 text-xs text-[#9499a0]">
+              <button
+                onClick={() => {
+                  setIndexPage((p) => Math.max(1, p - 1));
+                  window.scrollTo({ top: 400, behavior: 'smooth' });
+                }}
+                disabled={indexPage <= 1 || isCatalogLoading}
+                className="px-3.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                上一页
+              </button>
+              <span className="font-mono">
+                第 <span className="text-pink-400 font-bold">{indexPage}</span> / {catalogPageCount} 页
+              </span>
+              <button
+                onClick={() => {
+                  setIndexPage((p) => Math.min(catalogPageCount, p + 1));
+                  window.scrollTo({ top: 400, behavior: 'smooth' });
+                }}
+                disabled={indexPage >= catalogPageCount || isCatalogLoading}
+                className="px-3.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                下一页
+              </button>
             </div>
           </div>
 
@@ -440,11 +518,10 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
               <button
                 onClick={() => {
                   setIndexArea('all');
+                  setIndexTag('all');
                   setIndexStatus('all');
-                  setIndexSeason('all');
                   setIndexYear('all');
-                  setIndexStyle('all');
-                  setIndexOrder('score');
+                  setIndexPage(1);
                 }}
                 className="text-[11px] text-pink-400 hover:underline cursor-pointer"
               >
@@ -465,6 +542,23 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
             />
 
             <BiliRow
+              label="题材"
+              options={[
+                { id: 'all', label: '全部' },
+                { id: '热血', label: '热血' },
+                { id: '奇幻', label: '奇幻' },
+                { id: '冒险', label: '冒险' },
+                { id: '科幻', label: '科幻' },
+                { id: '战斗', label: '战斗' },
+                { id: '搞笑', label: '搞笑' },
+                { id: '恋爱', label: '恋爱' },
+                { id: '悬疑', label: '悬疑' },
+                { id: '日常', label: '日常' },
+              ]}
+              current={indexTag}
+              onChange={(t) => { setIndexTag(t); setIndexPage(1); }}
+            />
+            <BiliRow
               label="状态"
               options={[
                 { id: 'all', label: '全部' },
@@ -473,19 +567,6 @@ export function AnimePortal({ onSearch }: AnimePortalProps) {
               ]}
               current={indexStatus}
               onChange={setIndexStatus}
-            />
-
-            <BiliRow
-              label="季度"
-              options={[
-                { id: 'all', label: '全部' },
-                { id: '1', label: '1月冬番' },
-                { id: '4', label: '4月春番' },
-                { id: '7', label: '7月夏番' },
-                { id: '10', label: '10月秋番' },
-              ]}
-              current={indexSeason}
-              onChange={setIndexSeason}
             />
 
             <BiliRow
@@ -553,14 +634,19 @@ function CompactAnimeCard({
   anime: AnimeRecord;
   rankNum?: number;
   badge?: string;
-  onClick: () => void;
+  onClick?: () => void;
 }) {
   return (
-    <div
-      onClick={onClick}
+    <Link
+      href={`/?q=${encodeURIComponent(anime.title)}`}
+      onClick={(e) => {
+        if (onClick && !e.ctrlKey && !e.metaKey && e.button === 0) {
+          // 仅普通左键触发快捷通知
+          onClick();
+        }
+      }}
       className="group flex flex-col cursor-pointer transition-transform duration-200 hover:-translate-y-1 block w-full select-none"
     >
-      {/* 紧凑海报容器 */}
       <div className="relative aspect-[3/4] w-full overflow-hidden rounded-md bg-[#1f2022] shadow-sm group-hover:shadow-lg transition-all">
         <img
           src={anime.cover || '/placeholder-poster.svg'}
@@ -620,6 +706,6 @@ function CompactAnimeCard({
           <span>{anime.episodes || '今日更新'}</span>
         </div>
       </div>
-    </div>
+    </Link>
   );
 }

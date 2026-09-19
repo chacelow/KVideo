@@ -49,6 +49,12 @@ export function FavoritesSidebar({ isPremium = false }: { isPremium?: boolean })
             }
         };
     }, [isOpen]);
+    // 监听全局触发事件：从 Navbar 左侧一键打开/收起收藏
+    useEffect(() => {
+        const handleToggle = () => setIsOpen((prev) => !prev);
+        window.addEventListener('kvideo-toggle-favorites', handleToggle);
+        return () => window.removeEventListener('kvideo-toggle-favorites', handleToggle);
+    }, []);
 
     // Handle escape key to close sidebar
     useEffect(() => {

@@ -1,18 +1,11 @@
 'use client';
 
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { Icons } from '@/components/ui/Icon';
 import { getSourceName } from '@/lib/utils/source-names';
 import { htmlToText } from '@/lib/utils/html';
+import { Calendar, Globe, Check, Tag } from 'lucide-react';
 
-/**
- * Split person names by common delimiters (comma, Chinese comma, slash).
- * Does NOT split by space — Chinese names contain no spaces, and splitting
- * by space would break English names like "Tom Hanks".
- */
 function splitPersonNames(str: string): string[] {
-  return str.split(/[,，/]/).map(s => s.trim()).filter(Boolean);
+  return str.split(/[,，/]/).map((s) => s.trim()).filter(Boolean);
 }
 
 interface VideoMetadataProps {
@@ -25,9 +18,10 @@ export function VideoMetadata({ videoData, source, title }: VideoMetadataProps) 
   const description = htmlToText(videoData?.vod_content);
 
   return (
-    <Card hover={false}>
+    <div className="w-full text-xs text-[#e3e5e7] select-text py-1">
       <div className="flex flex-col sm:flex-row items-start gap-4">
-        <div className="w-24 h-36 sm:w-32 sm:h-48 rounded-[var(--radius-2xl)] border border-[var(--glass-border)] overflow-hidden bg-[color-mix(in_srgb,var(--glass-bg)_50%,transparent)] flex-shrink-0">
+        {/* 海报封面 (无厚卡片外壳，极简轻量圆角) */}
+        <div className="w-20 h-28 sm:w-24 sm:h-34 rounded-lg overflow-hidden bg-white/5 flex-shrink-0 border border-white/5">
           {videoData?.vod_pic ? (
             <img
               src={videoData.vod_pic}
@@ -45,91 +39,67 @@ export function VideoMetadata({ videoData, source, title }: VideoMetadataProps) 
               }}
             />
           ) : (
-            <img
-              src="/placeholder-poster.svg"
-              alt=""
-              className="w-full h-full object-cover"
-            />
+            <img src="/placeholder-poster.svg" alt="" className="w-full h-full object-cover" />
           )}
         </div>
-        <div className="flex-1">
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-[var(--text-color)] mb-3">
-            {videoData?.vod_name || title}
-          </h1>
-          <div className="flex flex-wrap gap-2 mb-4">
+
+        {/* 核心信息与简介 (纯文字流排版，极简清晰) */}
+        <div className="flex-1 min-w-0 space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-lg sm:text-xl font-bold text-white truncate">
+              {videoData?.vod_name || title}
+            </h1>
             {source && (
-              <Badge variant="primary" className="backdrop-blur-md">
-                <Icons.Check size={14} className="mr-1" />
-                {getSourceName(source)}
-              </Badge>
+              <span className="px-2 py-0.5 rounded bg-[#00aeec]/15 text-[#00aeec] text-[11px] font-semibold flex items-center gap-1">
+                <Check size={12} />
+                <span>{getSourceName(source)}</span>
+              </span>
             )}
             {videoData?.type_name && (
-              <Badge variant="secondary">{videoData.type_name}</Badge>
+              <span className="px-2 py-0.5 rounded bg-white/5 text-[#9499a0] text-[11px]">
+                {videoData.type_name}
+              </span>
             )}
             {videoData?.vod_year && (
-              <Badge variant="secondary">
-                <Icons.Calendar size={14} className="mr-1" />
-                {videoData.vod_year}
-              </Badge>
+              <span className="px-2 py-0.5 rounded bg-white/5 text-[#9499a0] text-[11px] flex items-center gap-1 font-mono">
+                <Calendar size={11} />
+                <span>{videoData.vod_year}</span>
+              </span>
             )}
             {videoData?.vod_area && (
-              <Badge variant="secondary">
-                <Icons.Globe size={14} className="mr-1" />
-                {videoData.vod_area}
-              </Badge>
-            )}
-            {videoData?.vod_lang && (
-              <Badge variant="secondary">
-                <Icons.Languages size={14} className="mr-1" />
-                {videoData.vod_lang}
-              </Badge>
+              <span className="px-2 py-0.5 rounded bg-white/5 text-[#9499a0] text-[11px] flex items-center gap-1">
+                <Globe size={11} />
+                <span>{videoData.vod_area}</span>
+              </span>
             )}
           </div>
+
+          {/* 演职员表 (紧凑纯文本) */}
+          {(videoData?.vod_director || videoData?.vod_actor) && (
+            <div className="space-y-1 text-[11px] text-[#9499a0]">
+              {videoData?.vod_director && (
+                <div className="flex gap-2">
+                  <span className="text-white/40 shrink-0">导演:</span>
+                  <span className="text-white/80">{splitPersonNames(videoData.vod_director).join(' / ')}</span>
+                </div>
+              )}
+              {videoData?.vod_actor && (
+                <div className="flex gap-2">
+                  <span className="text-white/40 shrink-0">主演:</span>
+                  <span className="text-white/80 line-clamp-1">{splitPersonNames(videoData.vod_actor).join(' / ')}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 剧情简介 (纯文本自然展开) */}
           {description && (
-            <p className="text-sm sm:text-base text-[var(--text-secondary)]">
+            <p className="text-[11px] text-[#9499a0] leading-relaxed line-clamp-3 pt-1 border-t border-white/5">
               {description}
             </p>
           )}
-          {videoData?.vod_actor && (
-            <div className="text-xs sm:text-sm text-[var(--text-tertiary)] mt-2">
-              <span className="font-semibold">主演：</span>
-              <span className="inline-flex flex-wrap gap-1">
-                {splitPersonNames(videoData.vod_actor).map((name) => (
-                  <a
-                    key={name}
-                    href={`https://movie.douban.com/celebrities/search?search_text=${encodeURIComponent(name)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-color)] hover:bg-[color-mix(in_srgb,var(--accent-color)_15%,transparent)] hover:border-[var(--accent-color)] hover:text-[var(--accent-color)] transition-all duration-200"
-                  >
-                    {name}
-                    <Icons.ExternalLink size={10} />
-                  </a>
-                ))}
-              </span>
-            </div>
-          )}
-          {videoData?.vod_director && (
-            <div className="text-xs sm:text-sm text-[var(--text-tertiary)] mt-1">
-              <span className="font-semibold">导演：</span>
-              <span className="inline-flex flex-wrap gap-1">
-                {splitPersonNames(videoData.vod_director).map((name) => (
-                  <a
-                    key={name}
-                    href={`https://movie.douban.com/celebrities/search?search_text=${encodeURIComponent(name)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-color)] hover:bg-[color-mix(in_srgb,var(--accent-color)_15%,transparent)] hover:border-[var(--accent-color)] hover:text-[var(--accent-color)] transition-all duration-200"
-                  >
-                    {name}
-                    <Icons.ExternalLink size={10} />
-                  </a>
-                ))}
-              </span>
-            </div>
-          )}
         </div>
       </div>
-    </Card>
+    </div>
   );
 }

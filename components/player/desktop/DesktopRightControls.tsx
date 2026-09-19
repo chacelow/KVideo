@@ -6,7 +6,6 @@ import { Icons } from '@/components/ui/Icon';
 import { SourceResolutionMenu, type SourceItem } from './SourceResolutionMenu';
 import { Check, MessageSquare } from 'lucide-react';
 import { PlayerSettingsMenu } from './PlayerSettingsMenu';
-import { DanmakuControlHub } from './DanmakuControlHub';
 import type { VideoResolutionInfo } from '../hooks/useVideoResolution';
 import type { UseDanmakuReturn } from '../hooks/useDanmaku';
 import { getPlatformLabel } from '@/lib/utils/danmaku-utils';

@@ -10,8 +10,7 @@ import {
   matchEpisode,
   extractPlatform,
   extractCleanKeywords,
-  isLegitimateSource,
-  sortSourcesBySeason,
+  extractNumber,
 } from '@/lib/utils/danmaku-utils';
 import type {
   DanmakuComment,
@@ -20,9 +19,13 @@ import type {
   DanmakuSourceInfo,
 } from '@/lib/types/danmaku';
 
+export type DanmakuSourceStatus = 'loading' | 'ready' | 'empty' | 'error';
+
 export interface ActiveSourceItem extends DanmakuSourceInfo {
   enabled: boolean;
-  offset: number; // 针对该源单独的时间轴偏移
+  offset: number;
+  status: DanmakuSourceStatus;
+  error?: string;
 }
 
 interface UseDanmakuOptions {
@@ -37,26 +40,42 @@ export interface UseDanmakuReturn {
   comments: DanmakuComment[];
   isLoading: boolean;
   error: string | null;
-  // 多源检测与细粒度控制
   detectedSources: DanmakuAnimeSource[];
   activeSourcesMap: Record<string, ActiveSourceItem>;
   toggleSourceEnabled: (anime: DanmakuAnimeSource, enabled?: boolean) => Promise<void>;
   setSourceOffset: (animeId: string | number, offset: number) => void;
   bindSourceEpisode: (anime: DanmakuAnimeSource, episode: DanmakuEpisode) => Promise<void>;
-  activeSource: DanmakuSourceInfo | null; // 主选源（方便兼容单选视图）
+  activeSource: DanmakuSourceInfo | null;
   selectSource: (anime: DanmakuAnimeSource, ep?: DanmakuEpisode) => Promise<void>;
-  // 全局时间轴偏移
   danmakuOffset: number;
   setDanmakuOffset: (offsetOrUpdater: number | ((prev: number) => number)) => void;
   followOffset: boolean;
   setFollowOffset: (follow: boolean) => void;
-  // 搜索与添加野生源
   searchKeyword: string;
   setSearchKeyword: (kw: string) => void;
   searchDanmakuSources: (keyword: string) => Promise<void>;
   selectAllSources: () => Promise<void>;
   unselectAllSources: () => void;
+  refreshSource: (anime: DanmakuAnimeSource) => Promise<void>;
+  refreshSources: () => Promise<void>;
 }
+
+type LoadedSource = Omit<ActiveSourceItem, 'enabled' | 'offset'>;
+const MIN_SOURCE_MATCH_SCORE = 50;
+
+function sourceMatchScore(anime: DanmakuAnimeSource, title: string, episodeNumber: number | null): number {
+  const sourceTitle = anime.animeTitle.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
+  const requestedTitle = title.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
+  if (requestedTitle.length < 2 || (!sourceTitle.includes(requestedTitle) && !requestedTitle.includes(sourceTitle))) return 0;
+  const hasEpisode = episodeNumber !== null
+    && anime.episodes.some((episode) => extractNumber(episode.episodeTitle) === episodeNumber);
+  return 80 + (hasEpisode ? 20 : 0);
+}
+
+function isRelevantSource(anime: DanmakuAnimeSource, title: string, episodeNumber: number | null): boolean {
+  return sourceMatchScore(anime, title, episodeNumber) >= MIN_SOURCE_MATCH_SCORE;
+}
+
 
 export function useDanmaku({ videoTitle, episodeName, episodeIndex }: UseDanmakuOptions): UseDanmakuReturn {
   const [danmakuEnabled, setDanmakuEnabledState] = useState(true);
@@ -64,24 +83,18 @@ export function useDanmaku({ videoTitle, episodeName, episodeIndex }: UseDanmaku
   const [comments, setComments] = useState<DanmakuComment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // 全网检索到的全部候选源
   const [detectedSources, setDetectedSources] = useState<DanmakuAnimeSource[]>([]);
-
-  // 多源独立控制状态表 (key: animeId)
   const [activeSourcesMap, setActiveSourcesMap] = useState<Record<string, ActiveSourceItem>>({});
+  const [danmakuOffset, setDanmakuOffsetState] = useState(0);
+  const [followOffset, setFollowOffsetState] = useState(true);
+  const [searchKeyword, setSearchKeyword] = useState(videoTitle || '');
 
-  // 缓存各源各集获取到的原始弹幕数据 (key: `${animeId}_${episodeId}` -> comments)
+  const activeSourcesRef = useRef<Record<string, ActiveSourceItem>>({});
+  const detectedSourcesRef = useRef<DanmakuAnimeSource[]>([]);
   const sourceCommentsCacheRef = useRef<Record<string, DanmakuComment[]>>({});
-  // 全局时间轴微调与跟随
-  const [danmakuOffset, setDanmakuOffsetState] = useState<number>(0);
-  const [followOffset, setFollowOffsetState] = useState<boolean>(true);
+  const loadGenerationRef = useRef(0);
+  const sourceRequestRef = useRef<Record<string, number>>({});
 
-  // 自定义搜索词
-  const [searchKeyword, setSearchKeyword] = useState<string>(videoTitle || '');
-  const fetchedKeyRef = useRef('');
-
-  // 1. 同步剧集历史记忆
   useEffect(() => {
     if (!videoTitle) return;
     const pref = danmakuPreferenceStore.getPreference(videoTitle);
@@ -89,508 +102,343 @@ export function useDanmaku({ videoTitle, episodeName, episodeIndex }: UseDanmaku
     setFollowOffsetState(pref.followOffset !== false);
   }, [videoTitle]);
 
-  // 2. 同步系统 API
   useEffect(() => {
     const updateApi = () => {
-      const s = settingsStore.getSettings();
-      // 默认开启弹幕显示
-      setDanmakuEnabledState(s.danmakuEnabled !== false);
-
+      const settings = settingsStore.getSettings();
+      setDanmakuEnabledState(settings.danmakuEnabled !== false);
       const userApi = userSourcesStore.getActiveDanmakuApi();
       const fallbackUrl = process.env.NEXT_PUBLIC_DANMAKU_API_URL || 'http://127.0.0.1:9321';
-      setApiUrl(userApi ? userApi.url : (s.danmakuApiUrl || fallbackUrl));
+      setApiUrl(userApi ? userApi.url : (settings.danmakuApiUrl || fallbackUrl));
     };
-
     updateApi();
-
-    const unsub1 = settingsStore.subscribe(updateApi);
-    const unsub2 = userSourcesStore.subscribe(updateApi);
+    const unsubscribeSettings = settingsStore.subscribe(updateApi);
+    const unsubscribeSources = userSourcesStore.subscribe(updateApi);
     return () => {
-      unsub1();
-      unsub2();
+      unsubscribeSettings();
+      unsubscribeSources();
     };
   }, []);
 
-  const setDanmakuEnabled = useCallback((v: boolean) => {
-    setDanmakuEnabledState(v);
-    const s = settingsStore.getSettings();
-    settingsStore.saveSettings({ ...s, danmakuEnabled: v });
+  const setDanmakuEnabled = useCallback((enabled: boolean) => {
+    setDanmakuEnabledState(enabled);
+    settingsStore.saveSettings({ ...settingsStore.getSettings(), danmakuEnabled: enabled });
   }, []);
 
-  // 更新全局时间轴偏移
-  const setDanmakuOffset = useCallback(
-    (offsetOrUpdater: number | ((prev: number) => number)) => {
-      setDanmakuOffsetState((prev) => {
-        const next = typeof offsetOrUpdater === 'function' ? offsetOrUpdater(prev) : offsetOrUpdater;
-        if (videoTitle) {
-          danmakuPreferenceStore.savePreference(videoTitle, { globalOffset: next });
-        }
-        return next;
-      });
-    },
-    [videoTitle]
-  );
+  const setDanmakuOffset = useCallback((value: number | ((prev: number) => number)) => {
+    setDanmakuOffsetState((previous) => {
+      const next = typeof value === 'function' ? value(previous) : value;
+      if (videoTitle) danmakuPreferenceStore.savePreference(videoTitle, { globalOffset: next });
+      return next;
+    });
+  }, [videoTitle]);
 
-  const setFollowOffset = useCallback(
-    (follow: boolean) => {
-      setFollowOffsetState(follow);
-      if (videoTitle) {
-        danmakuPreferenceStore.savePreference(videoTitle, { followOffset: follow });
-      }
-    },
-    [videoTitle]
-  );
+  const setFollowOffset = useCallback((follow: boolean) => {
+    setFollowOffsetState(follow);
+    if (videoTitle) danmakuPreferenceStore.savePreference(videoTitle, { followOffset: follow });
+  }, [videoTitle]);
 
-  // 重新合并所有已启用的来源弹幕
+  const cacheKey = useCallback((currentApi: string, animeId: string | number, episodeId: string | number) =>
+    `${currentApi}\u0000${animeId}\u0000${episodeId}`, []);
+
   const remergeComments = useCallback((sourcesMap: Record<string, ActiveSourceItem>) => {
     const merged: DanmakuComment[] = [];
-
-    for (const [animeId, item] of Object.entries(sourcesMap)) {
-      if (!item.enabled) continue;
-      const cacheKey = `${animeId}_${item.episodeId}`;
-      const cached = sourceCommentsCacheRef.current[cacheKey] || [];
-      const itemOffset = item.offset || 0;
-      for (const c of cached) {
-        merged.push({
-          ...c,
-          time: Math.max(0, c.time + itemOffset),
-        });
+    for (const item of Object.values(sourcesMap)) {
+      if (!item.enabled || item.episodeId === undefined) continue;
+      const cached = sourceCommentsCacheRef.current[cacheKey(apiUrl, item.animeId, item.episodeId)] || [];
+      for (const comment of cached) {
+        merged.push({ ...comment, time: Math.max(0, comment.time + (item.offset || 0)) });
       }
     }
-
     merged.sort((a, b) => a.time - b.time);
     setComments(merged);
-  }, []);
+  }, [apiUrl, cacheKey]);
 
-  // 3. 拉取单个来源的单集弹幕
-  const fetchSourceEpisodeComments = useCallback(
-    async (anime: DanmakuAnimeSource, ep: DanmakuEpisode, currentApi: string) => {
-      try {
-        const commentsUrl = `/api/danmaku?action=comments&episodeId=${encodeURIComponent(
-          String(ep.episodeId)
-        )}&apiUrl=${encodeURIComponent(currentApi)}`;
-        const commentsRes = await fetch(commentsUrl);
-        if (!commentsRes.ok) throw new Error(`拉取弹幕失败: HTTP ${commentsRes.status}`);
-        const commentsData = await commentsRes.json();
+  const persistMap = useCallback((sourcesMap: Record<string, ActiveSourceItem>, preferred?: DanmakuAnimeSource) => {
+    if (!videoTitle) return;
+    const sourcesConfig = Object.fromEntries(Object.entries(sourcesMap).map(([id, item]) => [id, {
+      animeId: item.animeId,
+      platform: item.platform,
+      enabled: item.enabled,
+      offset: item.offset,
+    }]));
+    danmakuPreferenceStore.savePreference(videoTitle, {
+      sourcesConfig,
+      ...(preferred ? {
+        preferredAnimeId: preferred.animeId,
+        preferredPlatform: extractPlatform(preferred.animeTitle),
+      } : {}),
+    });
+  }, [videoTitle]);
 
-        const { comments: parsedComments, videoDuration, count } = parseDanmakuResponse(commentsData);
+  const commitMap = useCallback((next: Record<string, ActiveSourceItem>, persist = false, preferred?: DanmakuAnimeSource) => {
+    activeSourcesRef.current = next;
+    setActiveSourcesMap(next);
+    remergeComments(next);
+    if (persist) persistMap(next, preferred);
+  }, [persistMap, remergeComments]);
 
-        const cacheKey = `${anime.animeId}_${ep.episodeId}`;
-        sourceCommentsCacheRef.current[cacheKey] = parsedComments;
+  const sourceShell = useCallback((anime: DanmakuAnimeSource, enabled: boolean, offset: number, status: DanmakuSourceStatus = 'loading'): ActiveSourceItem => ({
+    animeId: anime.animeId,
+    animeTitle: anime.animeTitle,
+    platform: extractPlatform(anime.animeTitle),
+    enabled,
+    offset,
+    status,
+  }), []);
 
-        return {
-          animeId: anime.animeId,
-          animeTitle: anime.animeTitle,
-          platform: extractPlatform(anime.animeTitle + ' ' + ep.episodeTitle),
-          episodeId: ep.episodeId,
-          episodeTitle: ep.episodeTitle,
-          videoDuration,
-          commentCount: count || parsedComments.length,
-        };
-      } catch (err) {
-        return null;
-      }
-    },
-    []
-  );
-
-  // 4. 多源控制：单独切换某个来源开启/关闭
-  const toggleSourceEnabled = useCallback(
-    async (anime: DanmakuAnimeSource, forceEnabled?: boolean) => {
-      if (!apiUrl) return;
-      const animeIdStr = String(anime.animeId);
-      const currentItem = activeSourcesMap[animeIdStr];
-      const willEnable = forceEnabled !== undefined ? forceEnabled : !currentItem?.enabled;
-
-      if (willEnable) {
-        const ep = matchEpisode(anime.episodes, episodeName, episodeIndex) || anime.episodes[0];
-        const cacheKey = ep ? `${animeIdStr}_${ep.episodeId}` : '';
-        if (ep && !sourceCommentsCacheRef.current[cacheKey]) {
-          setIsLoading(true);
-          const info = await fetchSourceEpisodeComments(anime, ep, apiUrl);
-          if (info) {
-            const updated = {
-              ...activeSourcesMap,
-              [animeIdStr]: {
-                ...info,
-                enabled: true,
-                offset: currentItem?.offset || 0,
-              },
-            };
-            setActiveSourcesMap(updated);
-            remergeComments(updated);
-            setIsLoading(false);
-            return;
-          }
-          setIsLoading(false);
-        }
-      }
-      const updated = {
-        ...activeSourcesMap,
-        [animeIdStr]: {
-          ...(currentItem || {
-            animeId: anime.animeId,
-            animeTitle: anime.animeTitle,
-            platform: extractPlatform(anime.animeTitle),
-            videoDuration: 0,
-            commentCount: 0,
-          }),
-          enabled: willEnable,
-          offset: currentItem?.offset || 0,
-        },
+  const fetchSourceEpisodeComments = useCallback(async (
+    anime: DanmakuAnimeSource,
+    episode: DanmakuEpisode,
+    currentApi: string,
+    force = false
+  ): Promise<LoadedSource> => {
+    const key = cacheKey(currentApi, anime.animeId, episode.episodeId);
+    if (!force && Object.prototype.hasOwnProperty.call(sourceCommentsCacheRef.current, key)) {
+      const cached = sourceCommentsCacheRef.current[key];
+      return {
+        animeId: anime.animeId,
+        animeTitle: anime.animeTitle,
+        platform: extractPlatform(`${anime.animeTitle} ${episode.episodeTitle}`),
+        episodeId: episode.episodeId,
+        episodeTitle: episode.episodeTitle,
+        commentCount: cached.length,
+        status: cached.length ? 'ready' : 'empty',
       };
-      setActiveSourcesMap(updated);
-      remergeComments(updated);
-
-      if (videoTitle) {
-        const pref = danmakuPreferenceStore.getPreference(videoTitle);
-        danmakuPreferenceStore.savePreference(videoTitle, {
-          sourcesConfig: {
-            ...pref.sourcesConfig,
-            [animeIdStr]: {
-              animeId: anime.animeId,
-              enabled: willEnable,
-              offset: currentItem?.offset || 0,
-            },
-          },
-        });
-      }
-    },
-    [activeSourcesMap, apiUrl, episodeIndex, episodeName, fetchSourceEpisodeComments, remergeComments, videoTitle]
-  );
-
-  // 5. 多源控制：单独为某个源微调偏移
-  const setSourceOffset = useCallback(
-    (animeId: string | number, offset: number) => {
-      const animeIdStr = String(animeId);
-      const currentItem = activeSourcesMap[animeIdStr];
-      if (!currentItem) return;
-
-      const updated = {
-        ...activeSourcesMap,
-        [animeIdStr]: {
-          ...currentItem,
-          offset,
-        },
-      };
-      setActiveSourcesMap(updated);
-      remergeComments(updated);
-
-      if (videoTitle) {
-        const pref = danmakuPreferenceStore.getPreference(videoTitle);
-        danmakuPreferenceStore.savePreference(videoTitle, {
-          sourcesConfig: {
-            ...pref.sourcesConfig,
-            [animeIdStr]: {
-              animeId,
-              enabled: currentItem.enabled,
-              offset,
-            },
-          },
-        });
-      }
-    },
-    [activeSourcesMap, remergeComments, videoTitle]
-  );
-  const bindSourceEpisode = useCallback(
-    async (anime: DanmakuAnimeSource, ep: DanmakuEpisode) => {
-      if (!apiUrl) return;
-      setIsLoading(true);
-      const animeIdStr = String(anime.animeId);
-      const currentItem = activeSourcesMap[animeIdStr];
-
-      const info = await fetchSourceEpisodeComments(anime, ep, apiUrl);
-      if (info) {
-        const updated = {
-          ...activeSourcesMap,
-          [animeIdStr]: {
-            ...info,
-            enabled: true,
-            offset: currentItem?.offset || 0,
-          },
-        };
-        setActiveSourcesMap(updated);
-        remergeComments(updated);
-      }
-      setIsLoading(false);
-    },
-    [activeSourcesMap, apiUrl, fetchSourceEpisodeComments, remergeComments]
-  );
-
-  // 7. 单选模式：一键只看该源
-  const selectSource = useCallback(
-    async (anime: DanmakuAnimeSource, ep?: DanmakuEpisode) => {
-      if (!apiUrl) return;
-      setIsLoading(true);
-      setError(null);
-
-      const targetEp = ep || matchEpisode(anime.episodes, episodeName, episodeIndex) || anime.episodes[0];
-      if (!targetEp) {
-        setIsLoading(false);
-        return;
-      }
-
-      const info = await fetchSourceEpisodeComments(anime, targetEp, apiUrl);
-      if (info) {
-        const animeIdStr = String(anime.animeId);
-        const newMap: Record<string, ActiveSourceItem> = {
-          [animeIdStr]: {
-            ...info,
-            enabled: true,
-            offset: activeSourcesMap[animeIdStr]?.offset || 0,
-          },
-        };
-        setActiveSourcesMap(newMap);
-        remergeComments(newMap);
-
-        if (videoTitle) {
-          danmakuPreferenceStore.savePreference(videoTitle, {
-            preferredAnimeId: anime.animeId,
-            preferredPlatform: extractPlatform(anime.animeTitle),
-          });
-        }
-      }
-      setIsLoading(false);
-    },
-    [activeSourcesMap, apiUrl, episodeIndex, episodeName, fetchSourceEpisodeComments, remergeComments, videoTitle]
-  );
-
-  // 8. 全选与全不选
-  const selectAllSources = useCallback(async () => {
-    if (!apiUrl || !detectedSources.length) return;
-    setIsLoading(true);
-    const newMap = { ...activeSourcesMap };
-
-    for (const anime of detectedSources) {
-      const animeIdStr = String(anime.animeId);
-      if (!sourceCommentsCacheRef.current[animeIdStr]) {
-        const ep = matchEpisode(anime.episodes, episodeName, episodeIndex) || anime.episodes[0];
-        if (ep) {
-          const info = await fetchSourceEpisodeComments(anime, ep, apiUrl);
-          if (info) {
-            newMap[animeIdStr] = {
-              ...info,
-              enabled: true,
-              offset: newMap[animeIdStr]?.offset || 0,
-            };
-          }
-        }
-      } else if (newMap[animeIdStr]) {
-        newMap[animeIdStr].enabled = true;
-      }
     }
+    try {
+      const url = `/api/danmaku?action=comments&episodeId=${encodeURIComponent(String(episode.episodeId))}&apiUrl=${encodeURIComponent(currentApi)}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`拉取弹幕失败: HTTP ${response.status}`);
+      const data = await response.json();
+      const parsed = parseDanmakuResponse(data);
+      sourceCommentsCacheRef.current[key] = parsed.comments;
+      return {
+        animeId: anime.animeId,
+        animeTitle: anime.animeTitle,
+        platform: extractPlatform(`${anime.animeTitle} ${episode.episodeTitle}`),
+        episodeId: episode.episodeId,
+        episodeTitle: episode.episodeTitle,
+        videoDuration: parsed.videoDuration,
+        commentCount: parsed.count || parsed.comments.length,
+        status: parsed.comments.length ? 'ready' : 'empty',
+      };
+    } catch (reason) {
+      return {
+        animeId: anime.animeId,
+        animeTitle: anime.animeTitle,
+        platform: extractPlatform(`${anime.animeTitle} ${episode.episodeTitle}`),
+        episodeId: episode.episodeId,
+        episodeTitle: episode.episodeTitle,
+        status: 'error',
+        error: reason instanceof Error ? reason.message : '加载弹幕失败',
+      };
+    }
+  }, [cacheKey]);
 
-    setActiveSourcesMap(newMap);
-    remergeComments(newMap);
-    setIsLoading(false);
-  }, [activeSourcesMap, apiUrl, detectedSources, episodeIndex, episodeName, fetchSourceEpisodeComments, remergeComments]);
+  const loadSource = useCallback(async (anime: DanmakuAnimeSource, episode: DanmakuEpisode, force = false) => {
+    if (!apiUrl) return;
+    const id = String(anime.animeId);
+    const generation = loadGenerationRef.current;
+    const request = (sourceRequestRef.current[id] || 0) + 1;
+    sourceRequestRef.current[id] = request;
+    const before = activeSourcesRef.current[id] || sourceShell(anime, false, 0);
+    commitMap({ ...activeSourcesRef.current, [id]: { ...before, episodeId: episode.episodeId, episodeTitle: episode.episodeTitle, status: 'loading', error: undefined } });
+    const loaded = await fetchSourceEpisodeComments(anime, episode, apiUrl, force);
+    if (sourceRequestRef.current[id] !== request || loadGenerationRef.current !== generation) return;
+    const current = activeSourcesRef.current[id] || before;
+    commitMap({ ...activeSourcesRef.current, [id]: { ...loaded, enabled: current.enabled, offset: current.offset } });
+  }, [apiUrl, commitMap, fetchSourceEpisodeComments, sourceShell]);
+
+  const toggleSourceEnabled = useCallback(async (anime: DanmakuAnimeSource, forced?: boolean) => {
+    const id = String(anime.animeId);
+    const current = activeSourcesRef.current[id];
+    const enabled = forced ?? !current?.enabled;
+    const next = { ...activeSourcesRef.current, [id]: { ...(current || sourceShell(anime, enabled, 0)), enabled } };
+    commitMap(next, true, enabled ? anime : undefined);
+    if (!enabled || !apiUrl) return;
+    const episode = matchEpisode(anime.episodes, episodeName, episodeIndex);
+    if (!episode) return;
+    const key = cacheKey(apiUrl, anime.animeId, episode.episodeId);
+    if (!Object.prototype.hasOwnProperty.call(sourceCommentsCacheRef.current, key)) await loadSource(anime, episode);
+  }, [apiUrl, cacheKey, commitMap, episodeIndex, episodeName, loadSource, sourceShell]);
+
+  const setSourceOffset = useCallback((animeId: string | number, offset: number) => {
+    const id = String(animeId);
+    const current = activeSourcesRef.current[id];
+    if (!current) return;
+    commitMap({ ...activeSourcesRef.current, [id]: { ...current, offset } }, true);
+  }, [commitMap]);
+
+  const bindSourceEpisode = useCallback(async (anime: DanmakuAnimeSource, episode: DanmakuEpisode) => {
+    const id = String(anime.animeId);
+    const current = activeSourcesRef.current[id] || sourceShell(anime, true, 0);
+    commitMap({ ...activeSourcesRef.current, [id]: { ...current, enabled: true, episodeId: episode.episodeId, episodeTitle: episode.episodeTitle } }, true, anime);
+    await loadSource(anime, episode);
+  }, [commitMap, loadSource, sourceShell]);
+
+  const selectSource = useCallback(async (anime: DanmakuAnimeSource, episode?: DanmakuEpisode) => {
+    const selectedEpisode = episode || matchEpisode(anime.episodes, episodeName, episodeIndex);
+    const id = String(anime.animeId);
+    const previous = activeSourcesRef.current[id];
+    const next = Object.fromEntries(Object.entries(activeSourcesRef.current).map(([key, item]) => [key, { ...item, enabled: key === id }]));
+    next[id] = { ...(previous || sourceShell(anime, true, 0)), enabled: true };
+    commitMap(next, true, anime);
+    if (selectedEpisode) await loadSource(anime, selectedEpisode);
+  }, [commitMap, episodeIndex, episodeName, loadSource, sourceShell]);
+
+  const selectAllSources = useCallback(async () => {
+    const next = { ...activeSourcesRef.current };
+    for (const anime of detectedSourcesRef.current) {
+      const id = String(anime.animeId);
+      next[id] = { ...(next[id] || sourceShell(anime, true, 0)), enabled: true };
+    }
+    commitMap(next, true);
+    await Promise.all(detectedSourcesRef.current.map(async (anime) => {
+      const episode = matchEpisode(anime.episodes, episodeName, episodeIndex);
+      if (episode) await loadSource(anime, episode);
+    }));
+  }, [commitMap, episodeIndex, episodeName, loadSource, sourceShell]);
 
   const unselectAllSources = useCallback(() => {
-    const newMap: Record<string, ActiveSourceItem> = {};
-    for (const [k, v] of Object.entries(activeSourcesMap)) {
-      newMap[k] = { ...v, enabled: false };
+    const next = Object.fromEntries(Object.entries(activeSourcesRef.current).map(([id, item]) => [id, { ...item, enabled: false }]));
+    commitMap(next, true);
+  }, [commitMap]);
+
+  const refreshSource = useCallback(async (anime: DanmakuAnimeSource) => {
+    const current = activeSourcesRef.current[String(anime.animeId)];
+    const episode = anime.episodes.find((candidate) => String(candidate.episodeId) === String(current?.episodeId))
+      || matchEpisode(anime.episodes, episodeName, episodeIndex);
+    if (episode) await loadSource(anime, episode, true);
+  }, [episodeIndex, episodeName, loadSource]);
+
+  const refreshSources = useCallback(async () => {
+    await Promise.all(detectedSourcesRef.current.map(refreshSource));
+  }, [refreshSource]);
+
+  const applyDetectedSources = useCallback(async (sources: DanmakuAnimeSource[], generation: number) => {
+    if (generation !== loadGenerationRef.current) return;
+    detectedSourcesRef.current = sources;
+    setDetectedSources(sources);
+    const preference = danmakuPreferenceStore.getPreference(videoTitle);
+    const saved = preference.sourcesConfig || {};
+    const hasExplicitSelection = Object.keys(saved).length > 0;
+    const trustedPlatforms = new Set(
+      Object.values(saved)
+        .filter((item) => item.enabled && item.platform)
+        .map((item) => item.platform as string)
+    );
+    if (!hasExplicitSelection && preference.preferredPlatform) trustedPlatforms.add(preference.preferredPlatform);
+    const next: Record<string, ActiveSourceItem> = {};
+    for (const anime of sources) {
+      const id = String(anime.animeId);
+      const config = saved[id];
+      const platform = extractPlatform(anime.animeTitle);
+      const explicitlyDisabledPlatform = Object.values(saved).some((item) => item.platform === platform && !item.enabled);
+      const trustsPlatform = !explicitlyDisabledPlatform && trustedPlatforms.has(platform);
+      const enabled = config ? config.enabled : (!hasExplicitSelection || trustsPlatform);
+      const matchedEpisode = matchEpisode(anime.episodes, episodeName, episodeIndex);
+      next[id] = sourceShell(anime, enabled, config?.offset || 0, matchedEpisode ? 'loading' : 'empty');
     }
-    setActiveSourcesMap(newMap);
-    setComments([]);
-  }, [activeSourcesMap]);
+    commitMap(next);
 
-  // 9. 手动按关键词重搜
-  const searchDanmakuSources = useCallback(
-    async (kw: string) => {
-      if (!apiUrl || !kw.trim()) return;
-      setIsLoading(true);
-      setError(null);
-      try {
-        const trimmed = kw.trim();
-        // 如果是 URL 链接，直接走 action=url 提取该网页的原生弹幕！
-        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-          const urlTarget = `/api/danmaku?action=url&url=${encodeURIComponent(trimmed)}&apiUrl=${encodeURIComponent(apiUrl)}`;
-          const urlRes = await fetch(urlTarget);
-          if (urlRes.ok) {
-            const urlData = await urlRes.json();
-            const { comments: parsedComments, videoDuration, count } = parseDanmakuResponse(urlData);
-            const virtualId = 'url_' + Date.now();
-            sourceCommentsCacheRef.current[virtualId] = parsedComments;
-            const newMap: Record<string, ActiveSourceItem> = {
-              ...activeSourcesMap,
-              [virtualId]: {
-                animeId: virtualId,
-                animeTitle: '外部视频直链弹幕 (' + trimmed.slice(0, 30) + '...)',
-                platform: extractPlatform(trimmed),
-                episodeId: virtualId,
-                episodeTitle: '当前直链',
-                videoDuration,
-                commentCount: count || parsedComments.length,
-                enabled: true,
-                offset: 0,
-              },
-            };
-            setActiveSourcesMap(newMap);
-            remergeComments(newMap);
-            setIsLoading(false);
-            return;
-          }
-        }
+    await Promise.all(sources.map(async (anime) => {
+      const episode = matchEpisode(anime.episodes, episodeName, episodeIndex);
+      if (episode) await loadSource(anime, episode);
+    }));
+  }, [commitMap, episodeIndex, episodeName, loadSource, sourceShell, videoTitle]);
 
-        // 否则走普通片名多轮检索
-        const searchUrl = `/api/danmaku?action=search&keyword=${encodeURIComponent(
-          trimmed
-        )}&apiUrl=${encodeURIComponent(apiUrl)}`;
-        const searchRes = await fetch(searchUrl);
-        if (!searchRes.ok) throw new Error(`搜索弹幕源失败: HTTP ${searchRes.status}`);
-        const searchData = await searchRes.json();
-        const results = parseSearchResults(searchData);
-        setDetectedSources(results);
-        // 默认自动将搜出的全部源自动加载合并！
-        if (results.length > 0) {
-          const newMap: Record<string, ActiveSourceItem> = {};
-          for (const anime of results) {
-            const ep = matchEpisode(anime.episodes, episodeName, episodeIndex) || anime.episodes[0];
-            if (ep) {
-              const info = await fetchSourceEpisodeComments(anime, ep, apiUrl);
-              if (info) {
-                newMap[String(anime.animeId)] = {
-                  ...info,
-                  enabled: true,
-                  offset: 0,
-                };
-              }
-            }
-          }
-          setActiveSourcesMap(newMap);
-          remergeComments(newMap);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '检索弹幕失败');
-      } finally {
-        setIsLoading(false);
+  const searchDanmakuSources = useCallback(async (keyword: string) => {
+    if (!apiUrl || !keyword.trim()) return;
+    const generation = ++loadGenerationRef.current;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const trimmed = keyword.trim();
+      if (/^https?:\/\//.test(trimmed)) {
+        const response = await fetch(`/api/danmaku?action=url&url=${encodeURIComponent(trimmed)}&apiUrl=${encodeURIComponent(apiUrl)}`);
+        if (!response.ok) throw new Error(`加载直链弹幕失败: HTTP ${response.status}`);
+        const parsed = parseDanmakuResponse(await response.json());
+        if (generation !== loadGenerationRef.current) return;
+        const id = `url_${Date.now()}`;
+        sourceCommentsCacheRef.current[cacheKey(apiUrl, id, id)] = parsed.comments;
+        const item: ActiveSourceItem = {
+          animeId: id,
+          animeTitle: `外部视频直链弹幕 (${trimmed.slice(0, 30)}...)`,
+          platform: extractPlatform(trimmed),
+          episodeId: id,
+          episodeTitle: '当前直链',
+          videoDuration: parsed.videoDuration,
+          commentCount: parsed.count || parsed.comments.length,
+          enabled: true,
+          offset: 0,
+          status: parsed.comments.length ? 'ready' : 'empty',
+        };
+        commitMap({ ...activeSourcesRef.current, [id]: item }, true);
+        return;
       }
-    },
-    [apiUrl, episodeIndex, episodeName, fetchSourceEpisodeComments, remergeComments]
-  );
+      const response = await fetch(`/api/danmaku?action=search&keyword=${encodeURIComponent(trimmed)}&apiUrl=${encodeURIComponent(apiUrl)}`);
+      if (!response.ok) throw new Error(`搜索弹幕源失败: HTTP ${response.status}`);
+      const targetEpisode = extractNumber(episodeName) || (episodeIndex !== undefined ? episodeIndex + 1 : null);
+      const results = parseSearchResults(await response.json())
+        .filter((source) => isRelevantSource(source, trimmed, targetEpisode))
+        .sort((a, b) => sourceMatchScore(b, trimmed, targetEpisode) - sourceMatchScore(a, trimmed, targetEpisode));
+      await applyDetectedSources(results, generation);
+    } catch (reason) {
+      if (generation === loadGenerationRef.current) setError(reason instanceof Error ? reason.message : '检索弹幕失败');
+    } finally {
+      if (generation === loadGenerationRef.current) setIsLoading(false);
+    }
+  }, [apiUrl, applyDetectedSources, cacheKey, commitMap, episodeIndex, episodeName]);
 
-  // 10. 首次播放或换集时：默认自动加载所有检测到的有效来源并合并！
   useEffect(() => {
     if (!apiUrl || !videoTitle) {
-      setComments([]);
+      loadGenerationRef.current += 1;
+      detectedSourcesRef.current = [];
+      activeSourcesRef.current = {};
       setDetectedSources([]);
       setActiveSourcesMap({});
+      setComments([]);
       return;
     }
-
+    const generation = ++loadGenerationRef.current;
     let cancelled = false;
-
-    async function autoDetectAllSources() {
-      setIsLoading(true);
-      setError(null);
-
+    setIsLoading(true);
+    setError(null);
+    const detect = async () => {
       try {
-        const pref = danmakuPreferenceStore.getPreference(videoTitle);
-        if (pref.followOffset && typeof pref.globalOffset === 'number') {
-          setDanmakuOffsetState(pref.globalOffset);
+        const merged = new Map<string, DanmakuAnimeSource>();
+        for (const keyword of extractCleanKeywords(videoTitle)) {
+          const response = await fetch(`/api/danmaku?action=search&keyword=${encodeURIComponent(keyword)}&apiUrl=${encodeURIComponent(apiUrl)}`);
+          if (!response.ok) continue;
+          for (const source of parseSearchResults(await response.json())) merged.set(String(source.animeId), source);
         }
-        // 多轮去噪与主干词候选检索 (彻底解决标题带4K/第01集/压制组导致搜空的问题)
-        const candidateKeywords = extractCleanKeywords(videoTitle);
-        const mergedResults: DanmakuAnimeSource[] = [];
-
-        for (const kw of candidateKeywords) {
-          try {
-            const searchUrl = `/api/danmaku?action=search&keyword=${encodeURIComponent(
-              kw
-            )}&apiUrl=${encodeURIComponent(apiUrl)}`;
-            const searchRes = await fetch(searchUrl);
-            if (searchRes.ok) {
-              const searchData = await searchRes.json();
-              const res = parseSearchResults(searchData);
-              for (const r of res) {
-                if (!mergedResults.some((m) => String(m.animeId) === String(r.animeId))) {
-                  mergedResults.push(r);
-                }
-              }
-            }
-          } catch {}
-          if (mergedResults.length >= 2) break; // 已命中充分的源，停止后续降级
-        }
-
-        if (cancelled) return;
-        // 严格正统过滤 (彻底剔除蹭热度的无关短剧) + 季度精准对齐 (第1季优先对齐第1季)
-        const legitimate = mergedResults.filter((r) => isLegitimateSource(r.animeTitle, videoTitle));
-        const finalResults = sortSourcesBySeason(
-          legitimate.length > 0 ? legitimate : mergedResults,
-          videoTitle
+        if (cancelled || generation !== loadGenerationRef.current) return;
+        const candidateTitles = extractCleanKeywords(videoTitle);
+        const targetEpisode = extractNumber(episodeName) || (episodeIndex !== undefined ? episodeIndex + 1 : null);
+        const savedSources = danmakuPreferenceStore.getPreference(videoTitle).sourcesConfig || {};
+        const matchScore = (source: DanmakuAnimeSource) => Math.max(
+          0,
+          ...candidateTitles.map((candidate) => sourceMatchScore(source, candidate, targetEpisode))
         );
-
-        setDetectedSources(finalResults);
-        const results = finalResults;
-        if (!results.length) {
-          setComments([]);
-          setActiveSourcesMap({});
-          setIsLoading(false);
-          return;
-        }
-
-        const savedSources = pref.sourcesConfig || {};
-        const hasCustomConfig = Object.keys(savedSources).length > 0;
-
-        const newMap: Record<string, ActiveSourceItem> = {};
-
-        // 【核心改进】：如果用户以前自定义过开启哪些，按记忆开启；
-        // 如果是新视频，默认将搜索出的全部来源全选加载并合并！
-        for (const anime of results) {
-          const animeIdStr = String(anime.animeId);
-          const shouldEnable = hasCustomConfig ? Boolean(savedSources[animeIdStr]?.enabled) : true;
-
-          if (shouldEnable) {
-            const ep = matchEpisode(anime.episodes, episodeName, episodeIndex) || anime.episodes[0];
-            if (ep) {
-              const info = await fetchSourceEpisodeComments(anime, ep, apiUrl);
-              if (info) {
-                newMap[animeIdStr] = {
-                  ...info,
-                  enabled: true,
-                  offset: savedSources[animeIdStr]?.offset || 0,
-                };
-              }
-            }
-          }
-        }
-
-        // 如果用户以前全关了导致为空，但有结果，兜底激活第一个
-        if (Object.keys(newMap).length === 0 && results.length > 0) {
-          const first = results[0];
-          const ep = matchEpisode(first.episodes, episodeName, episodeIndex) || first.episodes[0];
-          if (ep) {
-            const info = await fetchSourceEpisodeComments(first, ep, apiUrl);
-            if (info) {
-              newMap[String(first.animeId)] = { ...info, enabled: true, offset: 0 };
-            }
-          }
-        }
-
-        if (cancelled) return;
-
-        setActiveSourcesMap(newMap);
-        remergeComments(newMap);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : '加载弹幕失败');
-          setComments([]);
-          setActiveSourcesMap({});
-        }
+        const sorted = [...merged.values()]
+          .filter((source) => savedSources[String(source.animeId)] || matchScore(source) >= MIN_SOURCE_MATCH_SCORE)
+          .sort((a, b) => matchScore(b) - matchScore(a));
+        await applyDetectedSources(sorted, generation);
+      } catch (reason) {
+        if (!cancelled && generation === loadGenerationRef.current) setError(reason instanceof Error ? reason.message : '加载弹幕失败');
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled && generation === loadGenerationRef.current) setIsLoading(false);
       }
-    }
-
-    autoDetectAllSources();
-
+    };
+    void detect();
     return () => {
       cancelled = true;
     };
-  }, [apiUrl, videoTitle, episodeName, episodeIndex, fetchSourceEpisodeComments, remergeComments]);
+  }, [apiUrl, videoTitle, episodeName, episodeIndex, applyDetectedSources]);
 
-  // 计算一个当前活跃的主选源 (用于简单展示)
-  const activeSource = Object.values(activeSourcesMap).find((s) => s.enabled) || Object.values(activeSourcesMap)[0] || null;
+  const activeSource = Object.values(activeSourcesMap).find((source) => source.enabled)
+    || Object.values(activeSourcesMap)[0]
+    || null;
 
   return {
     danmakuEnabled,
@@ -614,5 +462,7 @@ export function useDanmaku({ videoTitle, episodeName, episodeIndex }: UseDanmaku
     searchDanmakuSources,
     selectAllSources,
     unselectAllSources,
+    refreshSource,
+    refreshSources,
   };
 }
