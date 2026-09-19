@@ -42,6 +42,8 @@ interface DesktopOverlayProps {
     onCycleWebFullscreenSize: () => void;
     containerRef: React.RefObject<HTMLDivElement | null>;
     isRotated?: boolean;
+    videoTitle?: string;
+    episodeName?: string;
 }
 
 export function DesktopOverlay({
@@ -81,6 +83,8 @@ export function DesktopOverlay({
     onCycleWebFullscreenSize,
     containerRef,
     isRotated = false,
+    videoTitle = '',
+    episodeName = '',
 }: DesktopOverlayProps) {
     // Show navigation buttons when controls are visible or when paused (controls usually show when paused anyway)
     const showNavButtons = showControls || !isPlaying;
@@ -88,35 +92,36 @@ export function DesktopOverlay({
 
     return (
         <>
-
-            {isFullscreen && fullscreenClock && (
-                <div
-                    className={`absolute top-8 left-1/2 -translate-x-1/2 z-40 transition-opacity duration-300 ${showFullscreenClock ? 'opacity-100' : 'opacity-0'}`}
-                    style={{ pointerEvents: 'none' }}
-                >
-                    <div className="min-w-[88px] px-4 py-2 rounded-full bg-black/45 backdrop-blur-md border border-white/15 text-center shadow-[0_10px_30px_rgba(0,0,0,0.3)]">
-                        <div className="flex items-center justify-center gap-2 text-white">
-                            <Icons.Clock size={14} className="opacity-80" />
-                            <span className="text-sm font-semibold tracking-[0.18em] tabular-nums">
-                                {fullscreenClock}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-
-            {/* Loading Spinner - Glass Effect */}
-            {isLoading && (
-                <div className="loading-overlay-glass">
-                    {isTransitioningToNextEpisode ? (
-                        <div className="next-episode-loading">
-                            <div className="spinner-glass"></div>
-                            <span className="next-episode-text">正在自动播放下一集...</span>
-                        </div>
-                    ) : (
-                        <div className="spinner-glass"></div>
+            {/* 播放器内部无边框顶层Header：随鼠标移动同步浮现 */}
+            <div
+                className={`absolute top-0 inset-x-0 z-40 bg-gradient-to-b from-black/85 via-black/40 to-transparent pt-3.5 pb-8 px-4 sm:px-6 flex items-center justify-between pointer-events-none transition-all duration-300 ${
+                    showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+                }`}
+            >
+                <div className="flex items-center gap-3 text-white min-w-0">
+                    <span className="text-sm sm:text-base font-bold truncate drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+                        {videoTitle || '正在播放'}
+                    </span>
+                    {episodeName && (
+                        <span className="text-xs font-semibold text-pink-400 bg-black/40 backdrop-blur-md px-2 py-0.5 rounded border border-white/10 shrink-0 drop-shadow">
+                            {episodeName}
+                        </span>
                     )}
+                </div>
+
+                {isFullscreen && fullscreenClock && (
+                    <div className="flex items-center gap-1.5 text-white/80 text-xs font-medium tabular-nums drop-shadow">
+                        <Icons.Clock size={13} />
+                        <span>{fullscreenClock}</span>
+                    </div>
+                )}
+            </div>
+
+
+            {/* 极轻量无感 Loading (彻底去除大黑框和'正在播放下一集'大字弹窗) */}
+            {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+                    <div className="w-10 h-10 border-3 border-pink-500/40 border-t-pink-500 rounded-full animate-spin"></div>
                 </div>
             )}
 
@@ -140,41 +145,6 @@ export function DesktopOverlay({
                 </div>
             )}
 
-            {/* Previous Button (Method: Skip Backward) */}
-            <div
-                className={`absolute left-0 top-0 bottom-0 flex items-center justify-center p-4 md:p-8 transition-opacity duration-300 z-10 ${showNavButtons ? 'opacity-100' : 'opacity-0'
-                    }`}
-                style={{ pointerEvents: showNavButtons ? 'auto' : 'none' }}
-            >
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onSkipBackward();
-                    }}
-                    className="group flex items-center justify-center w-10 h-10 md:w-16 md:h-16 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur-sm transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer"
-                    aria-label={`后退 ${seekStepSeconds} 秒`}
-                >
-                    <Icons.SkipBack className="w-5 h-5 md:w-8 md:h-8 text-white/80 group-hover:text-white" />
-                </button>
-            </div>
-
-            {/* Next Button (Method: Skip Forward) - Refined to use FastForward icon */}
-            <div
-                className={`absolute right-0 top-0 bottom-0 flex items-center justify-center p-4 md:p-8 transition-opacity duration-300 z-10 ${showNavButtons ? 'opacity-100' : 'opacity-0'
-                    }`}
-                style={{ pointerEvents: showNavButtons ? 'auto' : 'none' }}
-            >
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onSkipForward();
-                    }}
-                    className="group flex items-center justify-center w-10 h-10 md:w-16 md:h-16 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur-sm transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer"
-                    aria-label={`前进 ${seekStepSeconds} 秒`}
-                >
-                    <Icons.FastForward className="w-5 h-5 md:w-8 md:h-8 text-white/80 group-hover:text-white" />
-                </button>
-            </div>
 
             {/* Center Play Button (when paused) */}
             {!isPlaying && !isLoading && (

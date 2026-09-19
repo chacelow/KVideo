@@ -128,14 +128,17 @@ function PlayerContent() {
   }, [title]);
 
   // 切集处理
+  // 全屏无感切集：内存直接切流，完全不触发Next.js路由刷新，不打断全屏，零弹框
   const handleEpisodeClick = useCallback((episode: { name?: string; url: string }, index: number) => {
     setCurrentEpisode(index);
     setPlayUrl(episode.url);
-    const params = new URLSearchParams(window.location.search);
-    params.set('episode', index.toString());
-    params.delete('t'); // 清除旧进度，从头播放新集
-    router.replace(`/player?${params.toString()}`, { scroll: false });
-  }, [router, setCurrentEpisode, setPlayUrl]);
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      params.set('episode', index.toString());
+      params.delete('t');
+      window.history.replaceState(null, '', `/player?${params.toString()}`);
+    }
+  }, [setCurrentEpisode, setPlayUrl]);
 
   // 切源处理
   const handleSourceSelect = (target: SourceItem) => {
@@ -181,36 +184,7 @@ function PlayerContent() {
       {/* 52px 极简通用 Header */}
       <Navbar isPremiumMode={isPremium} onReset={() => router.push(isPremium ? '/premium' : '/')} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24 pt-3 space-y-4">
-        {/* 顶部标题栏与真实物理解码尺寸提示 */}
-        <div className="flex items-center justify-between gap-4 pb-2 border-b border-white/5 flex-wrap">
-          <div className="flex items-baseline gap-3 min-w-0">
-            <h1 className="text-base sm:text-xl font-bold text-white truncate">
-              {videoData?.vod_name || title}
-            </h1>
-            {videoData?.episodes?.[currentEpisode]?.name && (
-              <span className="text-xs sm:text-sm text-pink-400 font-semibold shrink-0">
-                {videoData.episodes[currentEpisode].name}
-              </span>
-            )}
-            {source && (
-              <span className="text-xs text-white/40 hidden sm:inline shrink-0">
-                ({getSourceName(source)})
-              </span>
-            )}
-          </div>
-
-          {/* 真实硬件解码物理像素 */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-xs">
-            <ShieldCheck size={14} className="text-emerald-400" />
-            <span className="text-white/60">真实硬件解码:</span>
-            <span className="font-bold text-white">
-              {hardwareResolution
-                ? `${hardwareResolution.width}x${hardwareResolution.height} (${hardwareResolution.label})`
-                : '检测物理分辨率中...'}
-            </span>
-          </div>
-        </div>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24 pt-6 space-y-6">
 
         {/* 1. 播放器主体：B站同款1280px宽屏自适应，完全充满无多余黑框 */}
         <div className="w-full rounded-xl overflow-hidden shadow-2xl relative">

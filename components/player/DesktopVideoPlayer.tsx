@@ -451,8 +451,9 @@ export function DesktopVideoPlayer({
             onSpeedMenuMouseLeave={logic.startSpeedMenuTimeout}
             webFullscreenSize={webFullscreenSize}
             onCycleWebFullscreenSize={cycleWebFullscreenSize}
-            // Portal container
             containerRef={containerRef}
+            videoTitle={videoTitle}
+            episodeName={episodeName}
           />
 
             <DesktopControlsWrapper

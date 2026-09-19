@@ -62,7 +62,7 @@ export function PlayerSettingsMenu({
         </button>
       </Popover.Trigger>
 
-      <Popover.Portal>
+      <Popover.Portal container={typeof document !== 'undefined' ? (document.fullscreenElement as HTMLElement) || undefined : undefined}>
         <Popover.Content
           side="top"
           align="end"
